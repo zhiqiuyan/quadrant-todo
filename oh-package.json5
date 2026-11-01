@@ -1,0 +1,11 @@
+{
+  "modelVersion": "6.0.0",
+  "name": "quadrant-todo-harmony",
+  "version": "1.0.0",
+  "description": "四象限待办 · HarmonyOS 原生实现",
+  "main": "",
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {},
+  "devDependencies": {}
+}

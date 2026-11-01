@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>四象限待办 · 交互原型（预览用）</title>
+<!--
+  这是 HarmonyOS 版「四象限待办」的网页交互原型，仅用于在没有安装 DevEco Studio 时
+  快速预览视觉与交互。真正的交付物是 entry/src/main/ets 下的 ArkTS 工程。
+-->
+<style>
+:root{
+  --bg:#f5f6f8;--card:#fff;--fg:#1d1f23;--muted:#6b7280;--border:#e3e5e9;--accent:#2563eb;
+  --accent-soft:#e8effd;--danger:#dc2626;--on-accent:#fff;
+  --q1:#fee2e2;--q2:#dbeafe;--q3:#fef3c7;--q4:#e7e9ec;--scrim:rgba(16,20,24,.4);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#14161a;--card:#1f2228;--fg:#e8eaed;--muted:#9aa0a6;--border:#30343b;--accent:#60a5fa;
+    --accent-soft:#1e2a3d;--danger:#f87171;
+    --q1:#3b1d1d;--q2:#1b2a40;--q3:#3a3016;--q4:#2a2d33;--scrim:rgba(0,0,0,.6);
+  }
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;font-family:-apple-system,"PingFang SC","HarmonyOS Sans SC","Microsoft YaHei",sans-serif;
+  background:#0c0d10;display:flex;justify-content:center;min-height:100vh}
+.phone{width:100%;max-width:420px;background:var(--bg);color:var(--fg);min-height:100vh;display:flex;flex-direction:column;position:relative}
+@media (min-width:460px){.phone{margin:24px 0;border-radius:32px;min-height:calc(100vh - 48px);box-shadow:0 20px 60px #0008;overflow:hidden}}
+
+header{display:flex;align-items:center;gap:10px;padding:16px 16px 10px}
+header .t{flex:1}
+header h1{font-size:20px;margin:0;font-weight:700}
+header .sub{font-size:11px;color:var(--muted);margin-top:3px}
+.chip{font-size:12px;color:var(--accent);background:var(--accent-soft);padding:7px 12px;border-radius:14px;border:none;cursor:pointer;font-family:inherit}
+
+.board{flex:1;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:8px;padding:0 12px;min-height:0}
+.quad{border-radius:16px;padding:8px;display:flex;flex-direction:column;min-height:150px}
+.quad .hd{display:flex;justify-content:space-between;align-items:center;padding:0 2px}
+.quad .hd b{font-size:13px;font-weight:600}
+.quad .hd .n{font-size:11px;color:var(--muted)}
+.quad .hint{flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;text-align:center;opacity:.85}
+.quad .list{flex:1;overflow:auto;display:flex;flex-direction:column;gap:5px;padding-top:6px;scrollbar-width:none}
+.quad .list::-webkit-scrollbar{display:none}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 7px;display:flex;gap:6px;cursor:pointer}
+.card .cb{width:18px;height:18px;min-width:18px;border-radius:9px;border:1.5px solid var(--border);margin-top:1px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--on-accent)}
+.card.done .cb{background:var(--accent);border-color:var(--accent)}
+.card .body{flex:1;min-width:0}
+.card .title{font-size:13px;word-break:break-word}
+.card.done .title{color:var(--muted);text-decoration:line-through}
+.card .meta{font-size:10px;color:var(--muted);margin-top:2px;display:flex;gap:3px}
+.card .meta .over{color:var(--danger);font-weight:600}
+.card .meta .star{color:var(--danger)}
+.addrow{display:flex;gap:6px;margin-top:6px}
+.addrow input{flex:1;min-width:0;font:inherit;font-size:12px;color:var(--fg);background:var(--card);border:1px solid var(--border);border-radius:8px;padding:7px 8px;outline:none}
+.addrow input:focus{border-color:var(--accent)}
+.addrow button{width:32px;height:32px;min-width:32px;border:none;border-radius:16px;background:var(--accent);color:var(--on-accent);font-size:17px;cursor:pointer}
+
+footer{padding:10px 12px 16px}
+footer .fab{width:100%;height:44px;border:none;border-radius:22px;background:var(--accent);color:var(--on-accent);font-size:14px;cursor:pointer;font-family:inherit}
+
+.sheet{position:absolute;inset:0;display:none;z-index:20}
+.sheet.open{display:block}
+.sheet .scrim{position:absolute;inset:0;background:var(--scrim)}
+.sheet .panel{position:absolute;left:0;right:0;bottom:0;background:var(--card);border-radius:20px 20px 0 0;padding:18px 18px 24px;max-height:88%;overflow:auto}
+.sheet h2{font-size:16px;margin:0 0 12px}
+.sheet .x{float:right;color:var(--muted);cursor:pointer;padding:0 4px}
+.sheet label{display:block;font-size:12px;color:var(--muted);margin:14px 0 8px}
+.sheet input[type=text]{width:100%;font:inherit;font-size:15px;color:var(--fg);background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:11px 10px;outline:none;box-sizing:border-box}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chips button{font:inherit;font-size:12px;color:var(--fg);background:var(--bg);border:none;border-radius:12px;padding:6px 12px;cursor:pointer}
+.chips button.on{background:var(--accent);color:var(--on-accent)}
+.chips button.q1{background:var(--q1)}.chips button.q2{background:var(--q2)}.chips button.q3{background:var(--q3)}.chips button.q4{background:var(--q4)}
+.chips button.q1.on,.chips button.q2.on,.chips button.q3.on,.chips button.q4.on{background:var(--accent)}
+.togglerow{display:flex;align-items:center;justify-content:space-between;margin-top:16px;font-size:13px}
+.switch{width:44px;height:26px;border-radius:13px;background:var(--border);position:relative;cursor:pointer;transition:background .2s}
+.switch.on{background:var(--accent)}
+.switch::after{content:'';position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:10px;background:#fff;transition:left .2s}
+.switch.on::after{left:21px}
+.btnrow{display:flex;gap:10px;margin-top:20px}
+.btnrow button{flex:1;height:44px;border:none;border-radius:10px;font:inherit;font-size:14px;cursor:pointer}
+.btnrow .del{background:var(--bg);color:var(--danger)}
+.btnrow .save{background:var(--accent);color:var(--on-accent)}
+.ruler p{font-size:12px;color:var(--muted);line-height:1.7;margin:6px 0 14px}
+.ruler b{color:var(--fg)}
+.ruler .row{display:flex;gap:8px;font-size:12px;margin-bottom:8px}
+.ruler .row b{width:88px;min-width:88px}
+.ruler .row span{color:var(--muted)}
+.ruler .clear{font-size:12px;color:var(--danger);background:var(--bg);border:none;border-radius:12px;padding:8px 12px;cursor:pointer;margin-top:6px}
+</style>
+</head>
+<body>
+<div class="phone">
+  <header>
+    <div class="t">
+      <h1>四象限待办</h1>
+      <div class="sub" id="sub"></div>
+    </div>
+    <button class="chip" onclick="openRuler()">归类尺子</button>
+  </header>
+
+  <div class="board" id="board"></div>
+
+  <footer>
+    <button class="fab" onclick="openEditor()">＋ 新建任务</button>
+  </footer>
+
+  <!-- 编辑面板 -->
+  <div class="sheet" id="editor">
+    <div class="scrim" onclick="closeEditor()"></div>
+    <div class="panel">
+      <span class="x" onclick="closeEditor()">✕</span>
+      <h2 id="edTitle">新建任务</h2>
+      <input type="text" id="fTitle" placeholder="要做什么？">
+      <label>放在哪个象限</label>
+      <div class="chips" id="fQuad"></div>
+      <label>截止日期（当前：<span id="fDueLabel">未设置</span>）</label>
+      <div class="chips">
+        <button onclick="setDue(0)">今天</button>
+        <button onclick="setDue(1)">明天</button>
+        <button onclick="setDue(2)">后天</button>
+        <button onclick="setDue(-1)">清除</button>
+      </div>
+      <div class="togglerow">标记为重要 <div class="switch" id="fImp" onclick="toggleImp()"></div></div>
+      <div class="btnrow">
+        <button class="del" id="fDel" onclick="askDelete()">删除</button>
+        <button class="save" onclick="save()">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 归类尺子 -->
+  <div class="sheet" id="ruler">
+    <div class="scrim" onclick="closeRuler()"></div>
+    <div class="panel ruler">
+      <span class="x" onclick="closeRuler()">✕</span>
+      <h2>归类尺子</h2>
+      <p><b>重要：</b>会影响钱、岗位、口碑、健康、长期可积累技能的，一律算重要。判断标准是「半年后还重不重要」，而不是「现在有没有人催」。</p>
+      <p><b>不重要：</b>可代劳、可拒绝、对上面几项几乎无影响的事务性琐事。这类事做得再漂亮，也不会改变你的处境。</p>
+      <p><b>紧急：</b>有硬性截止时间，或者再拖下去会真的出问题。</p>
+      <p><b>不紧急：</b>没有硬截止，但拖久了会让「重要不紧急」变成「重要紧急」。</p>
+      <div class="row"><b>重要紧急</b><span>立刻做完，尽量清空</span></div>
+      <div class="row"><b>重要不紧急</b><span>主战场，预约进日历</span></div>
+      <div class="row"><b>紧急不重要</b><span>委托 / 缩短 / 批量处理</span></div>
+      <div class="row"><b>不重要不紧急</b><span>删掉，或只在闲时碰</span></div>
+      <p><b>口诀：</b>上午啃「重要不紧急」；中午到下午清「重要紧急」；碎片时间批量处理「紧急不重要」；第四格只在闲时碰。</p>
+      <button class="clear" onclick="clearDone()">清理已完成任务</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const QUADS = [
+  {key:1,name:'重要紧急',hint:'立刻做完，尽量清空',cls:'q1'},
+  {key:2,name:'重要不紧急',hint:'主战场，预约进日历',cls:'q2'},
+  {key:3,name:'紧急不重要',hint:'委托 / 缩短 / 批量处理',cls:'q3'},
+  {key:4,name:'不重要不紧急',hint:'删掉，或只在闲时碰',cls:'q4'},
+];
+const KEY = 'quadrant.tasks.v1';
+let tasks = JSON.parse(localStorage.getItem(KEY) || '[]');
+let editing = null;   // null=新建，否则为任务 id
+let draft = {};
+
+const save = { all(){ localStorage.setItem(KEY, JSON.stringify(tasks)); } };
+const $ = s => document.querySelector(s);
+const startOfDay = ts => { const d = new Date(ts); d.setHours(0,0,0,0); return d.getTime(); };
+const dayOffset = n => startOfDay(Date.now()) + n * 86400000;
+function dueLabel(ts){
+  if (!ts) return '';
+  const diff = Math.round((startOfDay(ts) - startOfDay(Date.now())) / 86400000);
+  if (diff === 0) return '今天';
+  if (diff === 1) return '明天';
+  if (diff === 2) return '后天';
+  if (diff < 0) return `逾期 ${-diff} 天`;
+  const d = new Date(ts);
+  return `${d.getMonth()+1}月${d.getDate()}日`;
+}
+
+function render(){
+  const active = tasks.filter(t => !t.completed);
+  const doneToday = tasks.filter(t => t.completed && t.updatedAt >= startOfDay(Date.now())).length;
+  $('#sub').textContent = active.length === 0 ? '把事放进格子里，脑子就空出来了'
+    : `${active.length} 项待办 · 今日完成 ${doneToday}`;
+  $('#board').innerHTML = QUADS.map(q => {
+    const items = active.filter(t => t.quadrant === q.key);
+    const cards = items.map(t => `
+      <div class="card" onclick="openEditor(${t.id})">
+        <div class="cb" onclick="event.stopPropagation();toggle(${t.id})">✓</div>
+        <div class="body">
+          <div class="title">${escapeHtml(t.title)}</div>
+          ${(t.dueAt || t.important) ? `<div class="meta">
+            ${t.important ? '<span class="star">★</span>' : ''}
+            ${t.dueAt ? `<span class="${startOfDay(t.dueAt) < startOfDay(Date.now()) ? 'over' : ''}">${dueLabel(t.dueAt)}</span>` : ''}
+          </div>` : ''}
+        </div>
+      </div>`).join('');
+    return `<div class="quad ${q.cls}">
+      <div class="hd"><b>${q.name}</b><span class="n">${items.length}</span></div>
+      ${items.length ? `<div class="list">${cards}</div>` : `<div class="hint">${q.hint}</div>`}
+      <div class="addrow">
+        <input placeholder="添加任务…" onkeydown="if(event.key==='Enter')quickAdd(${q.key},this)"
+               oninput="window._qa${q.key}=this.value" value="">
+        <button onclick="quickAdd(${q.key}, this.previousElementSibling)">＋</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function escapeHtml(s){
+  return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+function quickAdd(key, input){
+  const title = (window['_qa' + key] || '').trim();
+  if (!title) return;
+  tasks.unshift({id: Date.now(), title, quadrant: key, dueAt: 0, important: false, completed: false,
+    createdAt: Date.now(), updatedAt: Date.now()});
+  save.all(); render();
+}
+
+function toggle(id){
+  const t = tasks.find(x => x.id === id);
+  if (!t) return;
+  t.completed = !t.completed; t.updatedAt = Date.now();
+  save.all(); render();
+}
+
+function openEditor(id){
+  editing = typeof id === 'number' ? id : null;
+  const t = editing !== null ? tasks.find(x => x.id === editing) : null;
+  draft = t ? {...t} : {title:'', quadrant:1, dueAt:0, important:false};
+  $('#edTitle').textContent = t ? '编辑任务' : '新建任务';
+  $('#fTitle').value = draft.title;
+  $('#fDel').style.display = t ? '' : 'none';
+  $('#fImp').classList.toggle('on', draft.important);
+  $('#fQuad').innerHTML = QUADS.map(q =>
+    `<button class="${q.cls}${draft.quadrant === q.key ? ' on' : ''}" onclick="pickQuad(${q.key})">${q.name}</button>`).join('');
+  $('#fDueLabel').textContent = draft.dueAt ? dueLabel(draft.dueAt) : '未设置';
+  $('#editor').classList.add('open');
+  if (!t) setTimeout(() => $('#fTitle').focus(), 50);
+}
+function pickQuad(k){ draft.quadrant = k; openEditorQuads(); }
+function openEditorQuads(){
+  $('#fQuad').innerHTML = QUADS.map(q =>
+    `<button class="${q.cls}${draft.quadrant === q.key ? ' on' : ''}" onclick="pickQuad(${q.key})">${q.name}</button>`).join('');
+}
+function setDue(n){
+  draft.dueAt = n < 0 ? 0 : dayOffset(n);
+  $('#fDueLabel').textContent = draft.dueAt ? dueLabel(draft.dueAt) : '未设置';
+}
+function toggleImp(){ draft.important = !draft.important; $('#fImp').classList.toggle('on', draft.important); }
+function closeEditor(){ $('#editor').classList.remove('open'); }
+function save(){
+  const title = $('#fTitle').value.trim();
+  if (!title) { $('#fTitle').focus(); return; }
+  if (editing !== null){
+    const t = tasks.find(x => x.id === editing);
+    Object.assign(t, draft, {title, updatedAt: Date.now()});
+  } else {
+    tasks.unshift({id: Date.now(), title, quadrant: draft.quadrant, dueAt: draft.dueAt,
+      important: draft.important, completed: false, createdAt: Date.now(), updatedAt: Date.now()});
+  }
+  save.all(); closeEditor(); render();
+}
+function askDelete(){
+  const t = tasks.find(x => x.id === editing);
+  if (t && !confirm(`确定删除「${t.title}」？删除后不可恢复。`)) return;
+  tasks = tasks.filter(x => x.id !== editing);
+  save.all(); closeEditor(); render();
+}
+function openRuler(){ $('#ruler').classList.add('open'); }
+function closeRuler(){ $('#ruler').classList.remove('open'); }
+function clearDone(){
+  const n = tasks.filter(t => t.completed).length;
+  if (!n) return alert('暂无可清理的已完成任务');
+  if (!confirm(`将永久删除 ${n} 条已完成任务，是否继续？`)) return;
+  tasks = tasks.filter(t => !t.completed);
+  save.all(); closeRuler(); render();
+}
+
+/* 预置两条示例数据，首次打开即可感受交互 */
+if (tasks.length === 0 && !localStorage.getItem('quadrant.seeded')) {
+  tasks = [
+    {id:1,title:'把季度汇报的结论页写完',quadrant:1,dueAt:dayOffset(0),important:true,completed:false,createdAt:2,updatedAt:2},
+    {id:2,title:'系统学习 ArkTS 状态管理',quadrant:2,dueAt:0,important:true,completed:false,createdAt:3,updatedAt:3},
+    {id:3,title:'回复项目群里的排期确认',quadrant:3,dueAt:dayOffset(1),important:false,completed:false,createdAt:4,updatedAt:4},
+    {id:4,title:'整理收藏夹里的旧文章',quadrant:4,dueAt:0,important:false,completed:false,createdAt:5,updatedAt:5},
+  ];
+  localStorage.setItem('quadrant.seeded','1');
+  save.all();
+}
+render();
+</script>
+</body>
+</html>

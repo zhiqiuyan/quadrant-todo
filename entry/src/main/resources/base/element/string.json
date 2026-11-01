@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "四象限待办主模块"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "四象限待办"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "四象限待办"
+    }
+  ]
+}
