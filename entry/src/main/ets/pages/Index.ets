@@ -1,5 +1,4 @@
 import { common } from '@kit.AbilityKit';
-import { promptAction } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { QuadrantMeta, QUADRANTS, TaskItem, Q1 } from '../model/TaskItem';
 import { TaskRepository } from '../data/TaskRepository';
@@ -29,6 +28,10 @@ struct Index {
   /** 归类尺子面板 */
   @State showRuler: boolean = false;
 
+  /** 已完成面板 */
+  @State showDone: boolean = false;
+  @State doneTasks: TaskItem[] = [];
+
   /** 四个格子的快速输入框内容 */
   @State inputQ1: string = '';
   @State inputQ2: string = '';
@@ -43,7 +46,8 @@ struct Index {
 
   private async boot(): Promise<void> {
     try {
-      const context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+      const context: common.UIAbilityContext =
+        this.getUIContext().getHostContext() as common.UIAbilityContext;
       await TaskRepository.getInstance().init(context);
       await this.reload();
       this.ready = true;
@@ -57,13 +61,42 @@ struct Index {
     try {
       this.tasks = await TaskRepository.getInstance().listActive();
       this.completedToday = await TaskRepository.getInstance().countCompletedSince(DateUtil.todayStart());
+      if (this.showDone) {
+        await this.loadDone();
+      }
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'reload failed: %{public}s', (err as Error).message);
     }
   }
 
+  private async loadDone(): Promise<void> {
+    try {
+      this.doneTasks = await TaskRepository.getInstance().listCompleted(50);
+    } catch (err) {
+      hilog.error(DOMAIN, TAG, 'loadDone failed: %{public}s', (err as Error).message);
+    }
+  }
+
+  private openDone(): void {
+    this.showDone = true;
+    this.loadDone();
+  }
+
+  private async restoreTask(item: TaskItem): Promise<void> {
+    try {
+      await TaskRepository.getInstance().setCompleted(item.id, false);
+      await this.reload();
+    } catch (err) {
+      this.toast('恢复失败：' + (err as Error).message);
+    }
+  }
+
   private toast(message: string): void {
-    promptAction.showToast({ message: message, duration: 2000 });
+    try {
+      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'toast failed: %{public}s', (err as Error).message);
+    }
   }
 
   private tasksOf(quadrant: number): TaskItem[] {
@@ -187,7 +220,7 @@ struct Index {
   }
 
   private confirmDelete(id: number, title: string): void {
-    AlertDialog.show({
+    this.getUIContext().showAlertDialog({
       title: '删除任务',
       message: `确定删除「${title}」？删除后不可恢复。`,
       autoCancel: true,
@@ -221,11 +254,10 @@ struct Index {
       this.toast('暂无可清理的已完成任务');
       return;
     }
-    AlertDialog.show({
+    this.getUIContext().showAlertDialog({
       title: '清理已完成',
       message: '将永久删除全部已完成任务，是否继续？',
-      autoCancel: true,
-      primaryButton: {
+      autoCancel: true,      primaryButton: {
         value: '取消',
         action: () => {
         }
@@ -279,14 +311,25 @@ struct Index {
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
 
-      Text('归类尺子')
+      Text('尺子')
         .fontSize(12)
         .fontColor($r('app.color.accent'))
-        .padding({ left: 12, right: 12, top: 7, bottom: 7 })
+        .padding({ left: 10, right: 10, top: 7, bottom: 7 })
         .backgroundColor($r('app.color.accent_soft'))
         .borderRadius(14)
         .onClick(() => {
           this.showRuler = true;
+        })
+
+      Text('已完成')
+        .fontSize(12)
+        .fontColor($r('app.color.fg'))
+        .padding({ left: 10, right: 10, top: 7, bottom: 7 })
+        .backgroundColor($r('app.color.card'))
+        .borderRadius(14)
+        .margin({ left: 6 })
+        .onClick(() => {
+          this.openDone();
         })
     }
     .width('100%')
@@ -783,6 +826,102 @@ struct Index {
     .height('100%')
   }
 
+  @Builder
+  DonePanel() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor($r('app.color.scrim'))
+        .onClick(() => {
+          this.showDone = false;
+        })
+
+      Column() {
+        Row() {
+          Text('已完成')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.fg'))
+          Text(` ${this.doneTasks.length} 项`)
+            .fontSize(12)
+            .fontColor($r('app.color.muted'))
+            .layoutWeight(1)
+          Text('✕')
+            .fontSize(16)
+            .fontColor($r('app.color.muted'))
+            .padding(6)
+            .onClick(() => {
+              this.showDone = false;
+            })
+        }
+        .width('100%')
+
+        if (this.doneTasks.length === 0) {
+          Column() {
+            Text('还没有已完成的任务')
+              .fontSize(12)
+              .fontColor($r('app.color.muted'))
+          }
+          .width('100%')
+          .layoutWeight(1)
+          .justifyContent(FlexAlign.Center)
+        } else {
+          List({ space: 0 }) {
+            ForEach(this.doneTasks, (item: TaskItem) => {
+              ListItem() {
+                Row() {
+                  Text(item.title)
+                    .fontSize(13)
+                    .fontColor($r('app.color.muted'))
+                    .decoration({ type: TextDecorationType.LineThrough, color: $r('app.color.muted') })
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .layoutWeight(1)
+
+                  Text('恢复')
+                    .fontSize(11)
+                    .fontColor($r('app.color.accent'))
+                    .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                    .backgroundColor($r('app.color.accent_soft'))
+                    .borderRadius(10)
+                    .onClick(() => {
+                      this.restoreTask(item);
+                    })
+
+                  Text('删除')
+                    .fontSize(11)
+                    .fontColor($r('app.color.danger'))
+                    .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                    .backgroundColor($r('app.color.bg'))
+                    .borderRadius(10)
+                    .margin({ left: 6 })
+                    .onClick(() => {
+                      this.confirmDelete(item.id, item.title);
+                    })
+                }
+                .width('100%')
+                .padding({ top: 9, bottom: 9 })
+                .border({ width: { bottom: 0.5 }, color: $r('app.color.border') })
+              }
+            }, (item: TaskItem) => `done-${item.id}`)
+          }
+          .width('100%')
+          .layoutWeight(1)
+          .scrollBar(BarState.Off)
+          .padding({ top: 6 })
+        }
+      }
+      .width('100%')
+      .height('62%')
+      .padding({ left: 18, right: 18, top: 18, bottom: 22 })
+      .backgroundColor($r('app.color.card'))
+      .borderRadius({ topLeft: 20, topRight: 20 })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
   build() {
     Stack() {
       Column() {
@@ -813,6 +952,10 @@ struct Index {
 
       if (this.showRuler) {
         this.RulerPanel()
+      }
+
+      if (this.showDone) {
+        this.DonePanel()
       }
     }
     .width('100%')

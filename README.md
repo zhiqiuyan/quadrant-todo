@@ -13,6 +13,7 @@
 | 跨象限移动（复制 + 删除） | ✅（Graph 限制） | ✅ 编辑面板直接改象限，无副作用 |
 | 逾期 / 今天 / 明天等日期标签 | ✅ | ✅ 且本地化更快 |
 | 长按删除 + 二次确认 | — | ✅ |
+| 已完成历史 / 恢复 / 删除 | — | ✅ 底部抽屉 |
 | 归类尺子（判定说明） | ✅ | ✅ 底部抽屉 |
 | 数据存储 | 微软 To Do（Graph API + OAuth） | 本地 RDB（relationalStore），开箱即用 |
 | 深色模式 | prefers-color-scheme | ✅ resources/dark 自动适配 |
@@ -39,12 +40,44 @@ quadrant-todo-harmony/
 
 ## 构建运行
 
+### 方式一：DevEco Studio（推荐，可装真机）
+
 1. 用 **DevEco Studio** 打开本目录（建议 6.0 及以上；首次打开若提示 Sync / 迁移工程模型，按提示确认即可）。
 2. 等待 hvigor 同步完成（会自动下载依赖）。
 3. 启动模拟器或连接真机，点击 Run。
 4. 真机运行需要签名：`File → Project Structure → Signing Configs → Automatically generate signature`，登录华为账号一键生成调试证书。
 
-技术要求：`compatibleSdkVersion = 6.0.0(20)`，即 HarmonyOS 6.0（API 20）及以上设备。未显式指定 `compileSdkVersion`，编译时使用 IDE 配套 SDK，兼容较新版本 DevEco Studio。
+### 方式二：命令行构建（无需打开 IDE）
+
+```bash
+./build.sh          # debug 构建
+./build.sh release  # release 构建
+```
+
+脚本会自动指向 DevEco 自带的 SDK / Node / JBR，产物位于
+`entry/build/default/outputs/default/entry-default-unsigned.hap`。
+通过 `DEVECO_HOME` 环境变量可覆盖 DevEco 安装位置。
+
+### 方式三：命令行打包并签名
+
+```bash
+./build.sh              # 先编译出 unsigned HAP
+./tools/sign_hap.sh     # 用 SDK 内置测试证书链签成 dist/quadrant-todo-signed.hap
+```
+
+签名产物可用 `hap-sign-tool verify-app` 自检（脚本已内置该校验步骤）。
+
+**签名的兼容边界（重要）**：
+
+| 签名方式 | 证书来源 | 可安装范围 |
+|---|---|---|
+| 本脚本（已产出） | SDK 自带 `OpenHarmony.p12` 测试根 | 信任 OpenHarmony 测试根的设备 / 部分模拟器镜像 |
+| DevEco 自动签名 | 华为账号签发，绑定设备 UDID | **华为商用真机**（唯一可行路径，需登录账号后一键生成） |
+
+即：`dist/quadrant-todo-signed.hap` 证明打包链路完整、可校验，但**装不到华为商用手机上**。
+装真机请在 DevEco 里 `File → Project Structure → Signing Configs` 勾选自动签名后 Run。
+
+技术要求：`compatibleSdkVersion = 6.0.0(20)`，即 HarmonyOS 6.0（API 20）及以上设备。未显式指定 `compileSdkVersion`，编译时使用 IDE 配套 SDK。**已在 DevEco Studio 26.0.0（SDK API 26 / hvigor 6.26.9 / JBR 25）下实测编译通过，ArkTS 告警为 0。**
 
 ## 设计说明
 
@@ -58,4 +91,4 @@ quadrant-todo-harmony/
 1. **微软 To Do 同步**：`@ohos.net.http` + Web 组件实现 OAuth 2.0 PKCE；四个象限映射为四个 Graph 列表；写操作走乐观更新。需要 Azure 应用注册（SPA 重定向改为 `msauth://` 回调）。
 2. **桌面小组件**：Form 卡片展示「重要紧急」剩余项。
 3. **提醒**：reminderAgentManager 对 `dueAt` 设置系统提醒。
-4. **已完成列表页**：展示 `completed` 记录并支持恢复。
+4. **跨象限拖拽**：用 `onDragStart` / `onDrop` 替换当前的编辑面板改象限。

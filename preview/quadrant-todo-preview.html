@@ -32,6 +32,7 @@ header .t{flex:1}
 header h1{font-size:20px;margin:0;font-weight:700}
 header .sub{font-size:11px;color:var(--muted);margin-top:3px}
 .chip{font-size:12px;color:var(--accent);background:var(--accent-soft);padding:7px 12px;border-radius:14px;border:none;cursor:pointer;font-family:inherit}
+.chip.ghost{color:var(--fg);background:var(--card);border:1px solid var(--border)}
 
 .board{flex:1;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:8px;padding:0 12px;min-height:0}
 .quad{border-radius:16px;padding:8px;display:flex;flex-direction:column;min-height:150px}
@@ -95,7 +96,8 @@ footer .fab{width:100%;height:44px;border:none;border-radius:22px;background:var
       <h1>四象限待办</h1>
       <div class="sub" id="sub"></div>
     </div>
-    <button class="chip" onclick="openRuler()">归类尺子</button>
+    <button class="chip" onclick="openRuler()">尺子</button>
+    <button class="chip ghost" onclick="openDone()">已完成</button>
   </header>
 
   <div class="board" id="board"></div>
@@ -125,6 +127,16 @@ footer .fab{width:100%;height:44px;border:none;border-radius:22px;background:var
         <button class="del" id="fDel" onclick="askDelete()">删除</button>
         <button class="save" onclick="save()">保存</button>
       </div>
+    </div>
+  </div>
+
+  <!-- 已完成 -->
+  <div class="sheet" id="done">
+    <div class="scrim" onclick="closeDone()"></div>
+    <div class="panel">
+      <span class="x" onclick="closeDone()">✕</span>
+      <h2>已完成</h2>
+      <div id="doneList"></div>
     </div>
   </div>
 
@@ -269,6 +281,31 @@ function askDelete(){
 }
 function openRuler(){ $('#ruler').classList.add('open'); }
 function closeRuler(){ $('#ruler').classList.remove('open'); }
+function openDone(){
+  renderDone();
+  $('#done').classList.add('open');
+}
+function closeDone(){ $('#done').classList.remove('open'); }
+function renderDone(){
+  const done = tasks.filter(t => t.completed);
+  $('#doneList').innerHTML = done.length === 0
+    ? '<p style="color:var(--muted);font-size:12px;text-align:center;padding:40px 0">还没有已完成的任务</p>'
+    : done.map(t => `<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--border)">
+        <span style="flex:1;min-width:0;font-size:13px;color:var(--muted);text-decoration:line-through;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.title)}</span>
+        <button class="chip" style="padding:5px 10px" onclick="restore(${t.id})">恢复</button>
+        <button class="chip ghost" style="padding:5px 10px;color:var(--danger)" onclick="removeDone(${t.id})">删除</button>
+      </div>`).join('');
+}
+function restore(id){
+  const t = tasks.find(x => x.id === id);
+  if (!t) return;
+  t.completed = false; t.updatedAt = Date.now();
+  save.all(); render(); renderDone();
+}
+function removeDone(id){
+  tasks = tasks.filter(x => x.id !== id);
+  save.all(); render(); renderDone();
+}
 function clearDone(){
   const n = tasks.filter(t => t.completed).length;
   if (!n) return alert('暂无可清理的已完成任务');

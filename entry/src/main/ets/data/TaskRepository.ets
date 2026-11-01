@@ -38,8 +38,13 @@ export class TaskRepository {
       name: 'quadrant_todo.db',
       securityLevel: relationalStore.SecurityLevel.S1
     };
-    const store: relationalStore.RdbStore = await relationalStore.getRdbStore(context, config);
-    await store.executeSql(SQL_CREATE);
+    let store: relationalStore.RdbStore | undefined = undefined;
+    try {
+      store = await relationalStore.getRdbStore(context, config);
+      await store.executeSql(SQL_CREATE);
+    } catch (err) {
+      throw new Error(`初始化数据库失败：${(err as Error).message}`);
+    }
     this.store = store;
   }
 
@@ -52,20 +57,32 @@ export class TaskRepository {
 
   private async runQuery(predicates: relationalStore.RdbPredicates): Promise<TaskItem[]> {
     const result: TaskItem[] = [];
-    const rs: relationalStore.ResultSet = await this.db().query(predicates, COLUMNS);
-    while (rs.goToNextRow()) {
-      const item: TaskItem = new TaskItem();
-      item.id = rs.getLong(rs.getColumnIndex('id'));
-      item.title = rs.getString(rs.getColumnIndex('title'));
-      item.quadrant = rs.getLong(rs.getColumnIndex('quadrant'));
-      item.dueAt = rs.getLong(rs.getColumnIndex('due_at'));
-      item.important = rs.getLong(rs.getColumnIndex('important')) === 1;
-      item.completed = rs.getLong(rs.getColumnIndex('completed')) === 1;
-      item.createdAt = rs.getLong(rs.getColumnIndex('created_at'));
-      item.updatedAt = rs.getLong(rs.getColumnIndex('updated_at'));
-      result.push(item);
+    let rs: relationalStore.ResultSet | undefined = undefined;
+    try {
+      rs = await this.db().query(predicates, COLUMNS);
+      while (rs.goToNextRow()) {
+        const item: TaskItem = new TaskItem();
+        item.id = rs.getLong(rs.getColumnIndex('id'));
+        item.title = rs.getString(rs.getColumnIndex('title'));
+        item.quadrant = rs.getLong(rs.getColumnIndex('quadrant'));
+        item.dueAt = rs.getLong(rs.getColumnIndex('due_at'));
+        item.important = rs.getLong(rs.getColumnIndex('important')) === 1;
+        item.completed = rs.getLong(rs.getColumnIndex('completed')) === 1;
+        item.createdAt = rs.getLong(rs.getColumnIndex('created_at'));
+        item.updatedAt = rs.getLong(rs.getColumnIndex('updated_at'));
+        result.push(item);
+      }
+    } catch (err) {
+      throw new Error(`查询任务失败：${(err as Error).message}`);
+    } finally {
+      if (rs !== undefined) {
+        try {
+          rs.close();
+        } catch (closeErr) {
+          // 结果集关闭失败不影响已读取的数据
+        }
+      }
     }
-    rs.close();
     return result;
   }
 
@@ -91,12 +108,24 @@ export class TaskRepository {
     const predicates: relationalStore.RdbPredicates = new relationalStore.RdbPredicates(TABLE);
     predicates.equalTo('completed', 1);
     predicates.greaterThanOrEqualTo('updated_at', ts);
-    const rs: relationalStore.ResultSet = await this.db().query(predicates, ['id']);
     let count: number = 0;
-    while (rs.goToNextRow()) {
-      count++;
+    let rs: relationalStore.ResultSet | undefined = undefined;
+    try {
+      rs = await this.db().query(predicates, ['id']);
+      while (rs.goToNextRow()) {
+        count++;
+      }
+    } catch (err) {
+      throw new Error(`统计已完成任务失败：${(err as Error).message}`);
+    } finally {
+      if (rs !== undefined) {
+        try {
+          rs.close();
+        } catch (closeErr) {
+          // 结果集关闭失败不影响统计结果
+        }
+      }
     }
-    rs.close();
     return count;
   }
 
@@ -111,7 +140,11 @@ export class TaskRepository {
       'created_at': now,
       'updated_at': now
     };
-    return await this.db().insert(TABLE, values);
+    try {
+      return await this.db().insert(TABLE, values);
+    } catch (err) {
+      throw new Error(`新增任务失败：${(err as Error).message}`);
+    }
   }
 
   async updateFields(id: number, title: string, quadrant: number, dueAt: number,
@@ -125,7 +158,11 @@ export class TaskRepository {
     };
     const predicates: relationalStore.RdbPredicates = new relationalStore.RdbPredicates(TABLE);
     predicates.equalTo('id', id);
-    await this.db().update(values, predicates);
+    try {
+      await this.db().update(values, predicates);
+    } catch (err) {
+      throw new Error(`更新任务失败：${(err as Error).message}`);
+    }
   }
 
   async setCompleted(id: number, completed: boolean): Promise<void> {
@@ -135,19 +172,31 @@ export class TaskRepository {
     };
     const predicates: relationalStore.RdbPredicates = new relationalStore.RdbPredicates(TABLE);
     predicates.equalTo('id', id);
-    await this.db().update(values, predicates);
+    try {
+      await this.db().update(values, predicates);
+    } catch (err) {
+      throw new Error(`更新完成状态失败：${(err as Error).message}`);
+    }
   }
 
   async remove(id: number): Promise<void> {
     const predicates: relationalStore.RdbPredicates = new relationalStore.RdbPredicates(TABLE);
     predicates.equalTo('id', id);
-    await this.db().delete(predicates);
+    try {
+      await this.db().delete(predicates);
+    } catch (err) {
+      throw new Error(`删除任务失败：${(err as Error).message}`);
+    }
   }
 
   /** 清理全部已完成任务 */
   async clearCompleted(): Promise<number> {
     const predicates: relationalStore.RdbPredicates = new relationalStore.RdbPredicates(TABLE);
     predicates.equalTo('completed', 1);
-    return await this.db().delete(predicates);
+    try {
+      return await this.db().delete(predicates);
+    } catch (err) {
+      throw new Error(`清理已完成任务失败：${(err as Error).message}`);
+    }
   }
 }
