@@ -5,11 +5,11 @@ import { TaskRepository } from '../data/TaskRepository';
 import { DateUtil } from '../common/DateUtil';
 import { QUADRANTS, QuadrantMeta, TaskItem } from '../model/TaskItem';
 
-/** 卡片清单里的一行，序列化后随卡片数据下发 */
-export interface WidgetLineJson {
-  q: number;
+/** 象限内任务行，序列化后随卡片数据下发 */
+export interface WidgetTaskJson {
   t: string;
-  l: string;
+  o: boolean;
+  d: string;
 }
 
 /**
@@ -24,7 +24,13 @@ export class WidgetPayload {
   q2: number = 0;
   q3: number = 0;
   q4: number = 0;
-  linesJson: string = '[]';
+  /** 每个象限内的任务标题列表（各象限独立） */
+  q1Json: string = '[]';
+  q2Json: string = '[]';
+  q3Json: string = '[]';
+  q4Json: string = '[]';
+  /** 大卡片每格显示的行数（来自设置） */
+  linesPerQ: number = 3;
   updatedText: string = '';
 }
 
@@ -47,9 +53,12 @@ export class WidgetData {
     payload.total = tasks.length;
     payload.doneToday = await repo.countCompletedSince(DateUtil.todayStart());
     payload.updatedText = WidgetData.clock(Date.now());
+    payload.linesPerQ = SettingsStore.current().widgetLines;
 
+    const perQ: TaskItem[][] = [[], [], [], []];
     for (let i = 0; i < tasks.length; i++) {
       const task: TaskItem = tasks[i];
+      perQ[task.quadrant - 1].push(task);
       if (task.quadrant === 1) {
         payload.q1++;
       } else if (task.quadrant === 2) {
@@ -61,64 +70,26 @@ export class WidgetData {
       }
     }
 
-    payload.linesJson = JSON.stringify(WidgetData.pickLines(tasks, SettingsStore.current().widgetLines));
+    payload.q1Json = JSON.stringify(WidgetData.toJson(perQ[0]));
+    payload.q2Json = JSON.stringify(WidgetData.toJson(perQ[1]));
+    payload.q3Json = JSON.stringify(WidgetData.toJson(perQ[2]));
+    payload.q4Json = JSON.stringify(WidgetData.toJson(perQ[3]));
     return payload;
   }
 
-  /**
-   * 选进卡片的条目：先逾期，再今天到期，再重要，最后其余。
-   * 卡片空间有限，把「真的会出问题」的排在最前面。
-   */
-  private static pickLines(tasks: TaskItem[], max: number): WidgetLineJson[] {
-    const ordered: TaskItem[] = [];
-    WidgetData.collect(tasks, ordered, 1);
-    WidgetData.collect(tasks, ordered, 2);
-    WidgetData.collect(tasks, ordered, 3);
-    WidgetData.collect(tasks, ordered, 4);
-
-    const lines: WidgetLineJson[] = [];
-    for (let i = 0; i < ordered.length && lines.length < max; i++) {
-      const task: TaskItem = ordered[i];
-      const line: WidgetLineJson = {
-        q: task.quadrant,
+  /** 象限任务转卡片行：标题 + 逾期标记 + 到期标签 */
+  private static toJson(list: TaskItem[]): WidgetTaskJson[] {
+    const out: WidgetTaskJson[] = [];
+    for (let i = 0; i < list.length && out.length < 5; i++) {
+      const task: TaskItem = list[i];
+      const item: WidgetTaskJson = {
         t: task.title,
-        l: task.dueAt > 0 ? DateUtil.dueLabel(task.dueAt) : ''
+        o: DateUtil.isOverdue(task.dueAt),
+        d: task.dueAt > 0 ? DateUtil.dueLabel(task.dueAt) : ''
       };
-      lines.push(line);
+      out.push(item);
     }
-    return lines;
-  }
-
-  /** stage: 1 逾期 / 2 今日 / 3 重要 / 4 其他 */
-  private static collect(tasks: TaskItem[], out: TaskItem[], stage: number): void {
-    for (let i = 0; i < tasks.length; i++) {
-      const task: TaskItem = tasks[i];
-      if (WidgetData.contains(out, task.id)) {
-        continue;
-      }
-      let match: boolean = false;
-      if (stage === 1) {
-        match = DateUtil.isOverdue(task.dueAt);
-      } else if (stage === 2) {
-        match = DateUtil.isToday(task.dueAt);
-      } else if (stage === 3) {
-        match = task.important;
-      } else {
-        match = true;
-      }
-      if (match) {
-        out.push(task);
-      }
-    }
-  }
-
-  private static contains(list: TaskItem[], id: number): boolean {
-    for (let i = 0; i < list.length; i++) {
-      if (list[i].id === id) {
-        return true;
-      }
-    }
-    return false;
+    return out;
   }
 
   private static clock(ts: number): string {

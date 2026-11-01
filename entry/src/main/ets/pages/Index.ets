@@ -1,20 +1,24 @@
 import { common, ConfigurationConstant } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { webview } from '@kit.ArkWeb';
 import { QuadrantMeta, QUADRANTS, TaskItem, Q1 } from '../model/TaskItem';
 import { Account, accountInitial, avatarColor, AVATAR_COLORS } from '../model/Account';
 import {
   AppSettings, COLOR_MODE_OPTIONS, MODE_DARK, MODE_LIGHT, MODE_SYSTEM, SettingOption,
   SORT_OPTIONS, WIDGET_LINE_OPTIONS
 } from '../model/AppSettings';
+import { MsSyncResult } from '../model/MsTodo';
 import { TaskRepository } from '../data/TaskRepository';
 import { AccountStore } from '../data/AccountStore';
 import { SettingsStore } from '../data/SettingsStore';
 import { WidgetBridge } from '../data/WidgetBridge';
+import { MsAuthService } from '../data/MsAuthService';
+import { MsSyncService } from '../data/MsSyncService';
 import { DateUtil } from '../common/DateUtil';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.1.0';
+const APP_VERSION: string = '1.2.0';
 
 @Entry
 @Component
@@ -58,6 +62,17 @@ struct Index {
   @State inputQ3: string = '';
   @State inputQ4: string = '';
 
+  /** 微软 To Do 同步 */
+  @State msConnected: boolean = false;
+  @State msProfile: string = '';
+  @State msClientIdInput: string = '';
+  @State msAutoSync: boolean = true;
+  @State msLastSync: string = '';
+  @State msBusy: boolean = false;
+  @State showMsLogin: boolean = false;
+  @State msLoginUrl: string = '';
+  private webCtrl: webview.WebviewController = new webview.WebviewController();
+
   private ctx: common.UIAbilityContext | undefined = undefined;
 
   aboutToAppear(): void {
@@ -81,8 +96,12 @@ struct Index {
       await repo.init(context);
       repo.useAccount(this.account.id);
       this.applyColorMode(this.settings.colorMode);
+      this.refreshMsState();
       await this.reload();
       this.ready = true;
+      if (this.msConnected && MsAuthService.autoSync()) {
+        this.msBackgroundSync();
+      }
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'boot failed: %{public}s', (err as Error).message);
       this.toast('初始化失败：' + (err as Error).message);
@@ -101,10 +120,13 @@ struct Index {
     }
   }
 
-  /** 任何写操作之后：刷新界面 + 推送桌面卡片 */
+  /** 任何写操作之后：刷新界面 + 推送桌面卡片 + 按需云同步 */
   private async afterChange(): Promise<void> {
     await this.reload();
     await WidgetBridge.refreshAll(this.ctx);
+    if (this.msConnected && MsAuthService.autoSync()) {
+      await this.msBackgroundSync();
+    }
   }
 
   private async loadDone(): Promise<void> {
@@ -211,6 +233,7 @@ struct Index {
       TaskRepository.getInstance().useAccount(this.account.id);
       this.accounts = AccountStore.all();
       this.showAccount = false;
+      this.refreshMsState();
       await this.afterChange();
       this.toast(`已切换到「${this.account.name}」`);
     } catch (err) {
@@ -381,7 +404,14 @@ struct Index {
 
   private async doClearAll(): Promise<void> {
     try {
-      await TaskRepository.getInstance().clearAll();
+      const repo: TaskRepository = TaskRepository.getInstance();
+      if (this.msConnected) {
+        const all: TaskItem[] = await repo.listAll();
+        for (let i = 0; i < all.length; i++) {
+          await MsSyncService.recordDeletion(all[i]);
+        }
+      }
+      await repo.clearAll();
       await this.afterChange();
       this.toast('已清空');
     } catch (err) {
@@ -476,7 +506,11 @@ struct Index {
 
   private async doDelete(id: number): Promise<void> {
     try {
-      await TaskRepository.getInstance().remove(id);
+      const repo: TaskRepository = TaskRepository.getInstance();
+      const removed: TaskItem | undefined = await repo.remove(id);
+      if (removed !== undefined && this.msConnected) {
+        await MsSyncService.recordDeletion(removed);
+      }
       this.showEditor = false;
       await this.afterChange();
     } catch (err) {
@@ -510,7 +544,14 @@ struct Index {
 
   private async doClearCompleted(): Promise<void> {
     try {
-      await TaskRepository.getInstance().clearCompleted();
+      const repo: TaskRepository = TaskRepository.getInstance();
+      if (this.msConnected) {
+        const done: TaskItem[] = await repo.listCompleted(500);
+        for (let i = 0; i < done.length; i++) {
+          await MsSyncService.recordDeletion(done[i]);
+        }
+      }
+      await repo.clearCompleted();
       await this.afterChange();
       this.toast('已清理');
     } catch (err) {
@@ -527,6 +568,122 @@ struct Index {
       return false;
     }
     return DateUtil.startOfDay(this.draftDue) === DateUtil.dayOffset(offsetDays);
+  }
+
+  /* ==================== 微软 To Do ==================== */
+
+  /** 读取当前账号的微软连接状态到界面 */
+  private refreshMsState(): void {
+    MsAuthService.bind(this.account.id);
+    this.msConnected = MsAuthService.connected();
+    this.msProfile = MsAuthService.profileName();
+    this.msClientIdInput = MsAuthService.clientId();
+    this.msAutoSync = MsAuthService.autoSync();
+    this.msLastSync = MsAuthService.lastSync();
+  }
+
+  /** 后台静默同步：只在失败时提示，不抢焦点 */
+  private async msBackgroundSync(): Promise<void> {
+    if (this.msBusy || !MsAuthService.connected()) {
+      return;
+    }
+    this.msBusy = true;
+    try {
+      const result: MsSyncResult = await MsSyncService.sync();
+      this.msLastSync = MsAuthService.lastSync();
+      if (result.failed > 0) {
+        this.toast(result.message);
+      }
+      await this.reload();
+    } finally {
+      this.msBusy = false;
+    }
+  }
+
+  private async msSyncNow(): Promise<void> {
+    if (this.msBusy) {
+      return;
+    }
+    if (!this.msConnected) {
+      this.toast('请先连接微软账号');
+      return;
+    }
+    this.msBusy = true;
+    try {
+      const result: MsSyncResult = await MsSyncService.sync();
+      this.msLastSync = MsAuthService.lastSync();
+      this.toast(result.message);
+      await this.reload();
+    } finally {
+      this.msBusy = false;
+    }
+  }
+
+  private openMsLogin(): void {
+    if (!MsAuthService.hasClientId()) {
+      this.toast('请先填写并保存 Azure 应用 Client ID');
+      return;
+    }
+    this.msLoginUrl = MsAuthService.authorizeUrl();
+    this.showMsLogin = true;
+  }
+
+  /** Web 拦截：命中回调地址则阻断加载并接管 code */
+  private onWebNav(url: string): boolean {
+    if (MsAuthService.isRedirectUrl(url)) {
+      this.showMsLogin = false;
+      this.finishMsLogin(url);
+      return true;
+    }
+    return false;
+  }
+
+  private async finishMsLogin(url: string): Promise<void> {
+    this.msBusy = true;
+    try {
+      await MsAuthService.completeLogin(url);
+      this.refreshMsState();
+      this.toast(`已连接 ${this.msProfile.length > 0 ? this.msProfile : '微软账号'}`);
+      const result: MsSyncResult = await MsSyncService.initialPush();
+      this.msLastSync = MsAuthService.lastSync();
+      if (result.failed > 0 || result.pushed > 0) {
+        this.toast(result.message);
+      }
+      await this.reload();
+    } catch (err) {
+      this.toast((err as Error).message);
+    } finally {
+      this.msBusy = false;
+    }
+  }
+
+  private async saveMsClientId(): Promise<void> {
+    try {
+      await MsAuthService.setClientId(this.msClientIdInput);
+      this.msClientIdInput = MsAuthService.clientId();
+      this.toast('Client ID 已保存');
+    } catch (err) {
+      this.toast('保存失败：' + (err as Error).message);
+    }
+  }
+
+  private async toggleMsAutoSync(isOn: boolean): Promise<void> {
+    this.msAutoSync = isOn;
+    try {
+      await MsAuthService.setAutoSync(isOn);
+    } catch (err) {
+      this.toast('保存失败：' + (err as Error).message);
+    }
+  }
+
+  private async msDisconnect(): Promise<void> {
+    try {
+      await MsAuthService.disconnect();
+      this.refreshMsState();
+      this.toast('已断开微软账号');
+    } catch (err) {
+      this.toast('断开失败：' + (err as Error).message);
+    }
   }
 
   /* ==================== 视图 ==================== */
@@ -1580,6 +1737,110 @@ struct Index {
             .width('100%')
             this.HintText('长按桌面空白处 → 卡片 → 四象限待办，可选 4*4（方）与 6*4（宽幅，平板 / 2in1）。')
 
+            this.SectionTitle('微软 To Do')
+            Column({ space: 8 }) {
+              Row() {
+                Column() {
+                  Text(this.msConnected ?
+                    (this.msProfile.length > 0 ? this.msProfile : '已连接') : '未连接')
+                    .fontSize(13)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor($r('app.color.fg'))
+                  Text(this.msConnected ?
+                    (this.msLastSync.length > 0 ? this.msLastSync : '等待首次同步')
+                    : '把当前账号同步到微软 To Do')
+                    .fontSize(10)
+                    .fontColor($r('app.color.muted'))
+                    .margin({ top: 2 })
+                }
+                .alignItems(HorizontalAlign.Start)
+                .layoutWeight(1)
+
+                if (this.msConnected) {
+                  Text(this.msBusy ? '同步中…' : '立即同步')
+                    .fontSize(11)
+                    .fontColor($r('app.color.accent'))
+                    .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                    .backgroundColor($r('app.color.accent_soft'))
+                    .borderRadius(10)
+                    .onClick(() => {
+                      this.msSyncNow();
+                    })
+                  Text('断开')
+                    .fontSize(11)
+                    .fontColor($r('app.color.danger'))
+                    .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                    .backgroundColor($r('app.color.bg'))
+                    .borderRadius(10)
+                    .margin({ left: 6 })
+                    .onClick(() => {
+                      this.msDisconnect();
+                    })
+                } else {
+                  Text('连接微软账号')
+                    .fontSize(11)
+                    .fontColor($r('app.color.on_accent'))
+                    .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                    .backgroundColor($r('app.color.accent'))
+                    .borderRadius(10)
+                    .onClick(() => {
+                      this.openMsLogin();
+                    })
+                }
+              }
+              .width('100%')
+              .padding(10)
+              .borderRadius(12)
+              .backgroundColor($r('app.color.bg'))
+
+              if (!this.msConnected) {
+                Text('第一步：填写 Azure 应用 Client ID')
+                  .fontSize(11)
+                  .fontColor($r('app.color.muted'))
+                Row({ space: 8 }) {
+                  TextInput({ placeholder: 'Client ID（GUID）', text: this.msClientIdInput })
+                    .fontSize(12)
+                    .fontColor($r('app.color.fg'))
+                    .placeholderColor($r('app.color.muted'))
+                    .height(38)
+                    .layoutWeight(1)
+                    .backgroundColor($r('app.color.bg'))
+                    .borderRadius(10)
+                    .padding({ left: 10, right: 10 })
+                    .onChange((value: string) => {
+                      this.msClientIdInput = value;
+                    })
+                  Text('保存')
+                    .fontSize(11)
+                    .fontColor($r('app.color.accent'))
+                    .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                    .backgroundColor($r('app.color.accent_soft'))
+                    .borderRadius(10)
+                    .onClick(() => {
+                      this.saveMsClientId();
+                    })
+                }
+                .width('100%')
+              }
+
+              Row() {
+                Text('自动同步（改动后自动推送 / 拉取）')
+                  .fontSize(13)
+                  .fontColor($r('app.color.fg'))
+                  .layoutWeight(1)
+                Toggle({ type: ToggleType.Switch, isOn: this.msAutoSync })
+                  .selectedColor($r('app.color.accent'))
+                  .onChange((isOn: boolean) => {
+                    this.toggleMsAutoSync(isOn);
+                  })
+              }
+              .width('100%')
+              .margin({ top: 2 })
+            }
+            .width('100%')
+            .margin({ top: 8 })
+            this.HintText('四个象限对应微软 To Do 的四个同名清单，云端不存在则自动创建；冲突按最后修改时间胜出。需在 Azure 门户「应用注册」建公共客户端，回调填 nativeclient。')
+
             this.SectionTitle('数据')
             Row({ space: 10 }) {
               Text('清理已完成')
@@ -1666,6 +1927,49 @@ struct Index {
     .height('100%')
   }
 
+  @Builder
+  MsLoginPanel() {
+    Column() {
+      Row() {
+        Column() {
+          Text('登录 Microsoft 账号')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.fg'))
+          Text('登录完成会自动返回；仅授权读写你的待办')
+            .fontSize(10)
+            .fontColor($r('app.color.muted'))
+            .margin({ top: 2 })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+
+        Text('✕')
+          .fontSize(16)
+          .fontColor($r('app.color.muted'))
+          .padding(6)
+          .onClick(() => {
+            this.showMsLogin = false;
+          })
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14, top: 12, bottom: 8 })
+
+      Web({ src: this.msLoginUrl, controller: this.webCtrl })
+        .javaScriptAccess(true)
+        .domStorageAccess(true)
+        .zoomAccess(false)
+        .width('100%')
+        .layoutWeight(1)
+        .onLoadIntercept((event: OnLoadInterceptEvent) => {
+          return this.onWebNav(event.data.getRequestUrl());
+        })
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor($r('app.color.bg'))
+  }
+
   build() {
     Stack() {
       Column() {
@@ -1708,6 +2012,10 @@ struct Index {
 
       if (this.showSettings) {
         this.SettingsPanel()
+      }
+
+      if (this.showMsLogin) {
+        this.MsLoginPanel()
       }
     }
     .width('100%')

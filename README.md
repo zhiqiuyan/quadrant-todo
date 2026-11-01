@@ -15,14 +15,33 @@
 | 长按删除 + 二次确认 | — | ✅ |
 | 已完成历史 / 恢复 / 删除 | — | ✅ 底部抽屉 |
 | 归类尺子（判定说明） | ✅ | ✅ 底部抽屉 |
-| **桌面卡片** | — | ✅ **4\*4 看板卡 + 6\*4 清单卡** |
+| **桌面卡片** | — | ✅ **4\*4 看板卡 + 6\*4 看板卡（四象限铺满整卡）** |
 | **账号管理** | — | ✅ 多账号，任务按账号隔离 |
 | **设置项** | — | ✅ 默认象限 / 排序 / 外观 / 计数 / 卡片条数 |
-| 数据存储 | 微软 To Do（Graph API + OAuth） | 本地 RDB（relationalStore），开箱即用 |
+| **微软 To Do 同步** | ✅ MSAL | ✅ 内置 OAuth 2.0 PKCE + Graph REST，无需 MSAL |
+| 数据存储 | 微软 To Do（Graph API + OAuth） | 本地 RDB 为主，可选云同步 |
 | 深色模式 | prefers-color-scheme | ✅ resources/dark + 应用内三档切换 |
 | 适配设备 | 浏览器 | phone / tablet / 2in1 |
 
-**关于微软 To Do 同步**：参考版的核心依赖是 Microsoft Graph OAuth（MSAL + Azure 应用注册）。鸿蒙端没有 MSAL SDK，需要自行实现 PKCE 授权 + WebView 登录 + Graph REST 调用，且必须先在 Azure 注册应用并实名验证。为保证当前版本开箱可用，本版先做**本地持久化**，Graph 同步作为独立增量（见文末路线）。
+## 微软 To Do 同步（1.2.0 新增）
+
+设置 → 「微软 To Do」→ 填 Client ID → 连接微软账号，登录在应用内 Web 完成（OAuth 2.0 授权码 + PKCE，S256），token 按本地账号隔离存储、临期自动刷新。
+
+**准备工作（一次性，约 5 分钟）**：
+
+1. 打开 [Azure 门户 - 应用注册](https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade) → 新注册；
+2. 受支持的账户类型选「个人 Microsoft 账户」（或同时含工作/学校）；
+3. 平台选「移动和桌面应用程序」，回调 URI 填：`https://login.microsoftonline.com/common/oauth2/nativeclient`；
+4. 注册后复制「应用程序（客户端）ID」，填进应用设置即可。
+
+**同步规则**：
+
+- 四个象限对应微软 To Do 的四个同名清单（重要紧急 / 重要不紧急 / 紧急不重要 / 不重要不紧急），云端不存在则自动创建；
+- 每轮顺序：远端删除（墓碑队列）→ 推送本地改动 → 拉取远端变更；
+- 冲突按「最后修改时间胜出」；象限变更 = 旧清单删 + 新清单建（To Do 无跨清单移动 API）；
+- 自动同步默认开：改动后自动推送/拉取，也可在设置里手动「立即同步」。
+
+**已知限制**：token 存于应用 preferences（明文，卸载即清）；更新远端任务用「删+建」实现（PATCH 方法要求较新系统版本）；单次拉取上限 200 条。
 
 ## 桌面卡片
 
@@ -30,8 +49,8 @@
 
 | 卡片 | 尺寸 | 内容 | 适用 |
 |---|---|---|---|
-| 四象限看板 | `4*4` | 账号 + 待办总数 + 2×2 四格计数 | phone / tablet / 2in1 |
-| 待办清单 | `6*4` | 左侧四格计数，右侧优先清单（逾期 → 今天 → 重要）+ 今日完成 + 更新时间 | tablet / 2in1（宽幅） |
+| 四象限看板 | `4*4` | 2×2 四格计数铺满整卡 + 极简账号行 | phone / tablet / 2in1 |
+| 四象限看板（大） | `6*4` | 同样的四象限铺满布局 + 账号/总数/今日完成一行 + 最优先任务一行 | phone / tablet / 2in1 |
 
 > **尺寸说明**：HarmonyOS 的卡片尺寸是严格枚举，`form_config.json` 的 `supportDimensions` 只接受 `1*1 / 1*2 / 2*2 / 2*3 / 2*4 / 3*3 / 4*4 / 6*4`，**不存在 `4*6`**（填 `4*6` 会在 PreBuild 阶段报 `Schema validate failed`）。因此大卡片使用平台定义的 `6*4` 即「6 列 × 4 行」宽幅卡片；若你的目标是竖长卡片，平台当前没有对应档位，只能横向扩展。
 
@@ -137,8 +156,8 @@ quadrant-todo-harmony/
 
 ## 后续路线（可选增量）
 
-1. **微软 To Do 同步**：`@ohos.net.http` + Web 组件实现 OAuth 2.0 PKCE；四个象限映射为四个 Graph 列表；写操作走乐观更新。需要 Azure 应用注册（SPA 重定向改为 `msauth://` 回调）。
-2. **卡片内交互**：`postCardAction` 的 `message` 动作 + `onFormEvent` 支持在卡片上直接勾选完成任务。
-3. **提醒**：reminderAgentManager 对 `dueAt` 设置系统提醒。
-4. **跨象限拖拽**：用 `onDragStart` / `onDrop` 替换当前的编辑面板改象限。
+1. **卡片内交互**：`postCardAction` 的 `message` 动作 + `onFormEvent` 支持在卡片上直接勾选完成任务。
+2. **提醒**：reminderAgentManager 对 `dueAt` 设置系统提醒。
+3. **跨象限拖拽**：用 `onDragStart` / `onDrop` 替换当前的编辑面板改象限。
+4. **凭据加密存储**：把微软 token 迁到 `@ohos.security.asset`（当前为 preferences 明文）。
 5. **账号云同步**：接华为云 DB 或自建服务，实现多设备同账号同步（当前账号体系是纯本地）。

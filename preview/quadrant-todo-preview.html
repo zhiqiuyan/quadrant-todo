@@ -253,6 +253,26 @@ footer .fab{width:100%;height:44px;border:none;border-radius:22px;background:var
       <div class="cards" id="cardPreview"></div>
       <button class="chip" style="width:100%;height:38px;border-radius:10px" onclick="openSheet('widgets')">放大查看两种卡片</button>
 
+      <div class="sec">微软 To Do</div>
+      <div style="border:1px solid var(--border);border-radius:12px;padding:10px;margin-top:8px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1">
+            <div id="msStatus" style="font-size:13px;font-weight:600">未连接</div>
+            <div id="msSub" style="font-size:10px;color:var(--muted);margin-top:2px">把当前账号同步到微软 To Do</div>
+          </div>
+          <button class="chip" id="msAction" onclick="msToggle()">连接微软账号</button>
+        </div>
+        <div id="msSetup" style="margin-top:8px">
+          <div style="font-size:11px;color:var(--muted)">第一步：填写 Azure 应用 Client ID</div>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <input id="msClientId" placeholder="Client ID（GUID）" style="flex:1;height:34px;border-radius:10px;border:none;background:var(--bg);color:var(--fg);padding:0 10px;font-size:12px"/>
+            <button class="chip" onclick="saveClientId()">保存</button>
+          </div>
+        </div>
+        <div class="togglerow" style="margin-top:8px">自动同步（改动后自动推送 / 拉取） <div class="switch on" id="msAuto" onclick="toggleMsAuto()"></div></div>
+      </div>
+      <div class="hintline">四个象限对应微软 To Do 的四个同名清单，云端不存在则自动创建；冲突按最后修改时间胜出。需在 Azure 门户「应用注册」建公共客户端，回调填 nativeclient。</div>
+
       <div class="sec">数据</div>
       <div class="chips">
         <button onclick="clearDone()">清理已完成</button>
@@ -261,9 +281,10 @@ footer .fab{width:100%;height:44px;border:none;border-radius:22px;background:var
 
       <div class="sec">关于</div>
       <div style="font-size:12px;line-height:2">
-        <div style="display:flex"><span style="flex:1;color:var(--muted)">版本</span><span>1.1.0</span></div>
+        <div style="display:flex"><span style="flex:1;color:var(--muted)">版本</span><span>1.2.0</span></div>
         <div style="display:flex"><span style="flex:1;color:var(--muted)">存储</span><span>本机数据库（RDB）</span></div>
         <div style="display:flex"><span style="flex:1;color:var(--muted)">卡片尺寸</span><span>4*4 / 6*4</span></div>
+        <div style="display:flex"><span style="flex:1;color:var(--muted)">云同步</span><span>微软 To Do（Graph API）</span></div>
       </div>
       <div class="hintline">任务与账号均不上传，卸载应用即清除全部数据。</div>
     </div>
@@ -625,10 +646,59 @@ function renderCards(){
   $('#cardPreview2').innerHTML = html;
 }
 
+/* ---------- 微软 To Do（演示态，不发起真实网络请求） ---------- */
+let toastTimer = null;
+function toastMsg(text){
+  let el = document.getElementById('toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast';
+    el.style.cssText = 'position:fixed;left:50%;bottom:96px;transform:translateX(-50%);' +
+      'background:rgba(20,20,25,.92);color:#fff;font-size:12px;padding:9px 16px;border-radius:18px;' +
+      'z-index:99;pointer-events:none;transition:opacity .2s;opacity:0;max-width:80%;text-align:center';
+    document.body.appendChild(el);
+  }
+  el.textContent = text;
+  el.style.opacity = '1';
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 2200);
+}
+function msState(){
+  return JSON.parse(localStorage.getItem('ms_demo') || '{"connected":false,"auto":true,"cid":""}');
+}
+function msSaveState(s){ localStorage.setItem('ms_demo', JSON.stringify(s)); }
+function renderMs(){
+  const s = msState();
+  $('#msStatus').textContent = s.connected ? 'demo@outlook.com' : '未连接';
+  $('#msSub').textContent = s.connected ? '上次同步：刚刚（演示）' : '把当前账号同步到微软 To Do';
+  $('#msAction').textContent = s.connected ? '断开' : '连接微软账号';
+  $('#msSetup').style.display = s.connected ? 'none' : 'block';
+  $('#msAuto').classList.toggle('on', s.auto);
+  if (document.getElementById('msClientId') && !s.cid) $('#msClientId').value = '';
+}
+function msToggle(){
+  const s = msState();
+  if (!s.connected && !s.cid) { toastMsg('请先填写并保存 Azure 应用 Client ID'); return; }
+  s.connected = !s.connected;
+  msSaveState(s); renderMs();
+  toastMsg(s.connected ? '已连接（演示：真机走 OAuth PKCE 登录）' : '已断开微软账号');
+}
+function saveClientId(){
+  const s = msState();
+  s.cid = $('#msClientId').value.trim();
+  if (!s.cid) { toastMsg('请输入 Client ID'); return; }
+  msSaveState(s); toastMsg('Client ID 已保存');
+}
+function toggleMsAuto(){
+  const s = msState(); s.auto = !s.auto; msSaveState(s); renderMs();
+}
+renderMs();
+
 /* ---------- 面板 ---------- */
 function openSheet(name){
   if (name === 'account') renderAccounts();
   if (name === 'settings') renderSettings();
+  if (name === 'settings') renderMs();
   $('#' + name).classList.add('open');
 }
 function closeSheet(name){ $('#' + name).classList.remove('open'); }

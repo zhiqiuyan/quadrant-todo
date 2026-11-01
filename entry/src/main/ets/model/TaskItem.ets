@@ -24,6 +24,12 @@ export class TaskItem {
   completed: boolean = false;
   createdAt: number = 0;
   updatedAt: number = 0;
+  /** Microsoft To Do 任务 id；空串表示尚未同步到云端 */
+  msId: string = '';
+  /** 该任务在微软端所属清单 id（与象限对应） */
+  msListId: string = '';
+  /** 本地改动未推送标记 */
+  dirty: boolean = false;
 
   /** 返回一份浅拷贝，用于构造 UI 层不可变快照 */
   copy(): TaskItem {
@@ -36,6 +42,9 @@ export class TaskItem {
     next.completed = this.completed;
     next.createdAt = this.createdAt;
     next.updatedAt = this.updatedAt;
+    next.msId = this.msId;
+    next.msListId = this.msListId;
+    next.dirty = this.dirty;
     return next;
   }
 }
