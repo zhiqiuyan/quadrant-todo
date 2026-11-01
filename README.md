@@ -15,27 +15,75 @@
 | 长按删除 + 二次确认 | — | ✅ |
 | 已完成历史 / 恢复 / 删除 | — | ✅ 底部抽屉 |
 | 归类尺子（判定说明） | ✅ | ✅ 底部抽屉 |
+| **桌面卡片** | — | ✅ **4\*4 看板卡 + 6\*4 清单卡** |
+| **账号管理** | — | ✅ 多账号，任务按账号隔离 |
+| **设置项** | — | ✅ 默认象限 / 排序 / 外观 / 计数 / 卡片条数 |
 | 数据存储 | 微软 To Do（Graph API + OAuth） | 本地 RDB（relationalStore），开箱即用 |
-| 深色模式 | prefers-color-scheme | ✅ resources/dark 自动适配 |
+| 深色模式 | prefers-color-scheme | ✅ resources/dark + 应用内三档切换 |
 | 适配设备 | 浏览器 | phone / tablet / 2in1 |
 
 **关于微软 To Do 同步**：参考版的核心依赖是 Microsoft Graph OAuth（MSAL + Azure 应用注册）。鸿蒙端没有 MSAL SDK，需要自行实现 PKCE 授权 + WebView 登录 + Graph REST 调用，且必须先在 Azure 注册应用并实名验证。为保证当前版本开箱可用，本版先做**本地持久化**，Graph 同步作为独立增量（见文末路线）。
+
+## 桌面卡片
+
+两种尺寸，均可在「长按桌面空白处 → 卡片 → 四象限待办」添加：
+
+| 卡片 | 尺寸 | 内容 | 适用 |
+|---|---|---|---|
+| 四象限看板 | `4*4` | 账号 + 待办总数 + 2×2 四格计数 | phone / tablet / 2in1 |
+| 待办清单 | `6*4` | 左侧四格计数，右侧优先清单（逾期 → 今天 → 重要）+ 今日完成 + 更新时间 | tablet / 2in1（宽幅） |
+
+> **尺寸说明**：HarmonyOS 的卡片尺寸是严格枚举，`form_config.json` 的 `supportDimensions` 只接受 `1*1 / 1*2 / 2*2 / 2*3 / 2*4 / 3*3 / 4*4 / 6*4`，**不存在 `4*6`**（填 `4*6` 会在 PreBuild 阶段报 `Schema validate failed`）。因此大卡片使用平台定义的 `6*4` 即「6 列 × 4 行」宽幅卡片；若你的目标是竖长卡片，平台当前没有对应档位，只能横向扩展。
+
+刷新机制：`EntryFormAbility` 记录每个卡片实例的 formId（存 preferences），主界面任何写操作后由 `WidgetBridge.refreshAll()` 主动 `updateForm` 推送；另有 `updateDuration: 2`（约 1 小时）兜底刷新。
+
+## 账号管理
+
+- 账号存在本机 `preferences`（`accounts_json` + `active_account_id`），**不联网、不上传**。
+- 任务表新增 `account_id` 列，所有查询按当前账号过滤，切换账号即切换整份清单。
+- 老版本数据库自动迁移：`ALTER TABLE task ADD COLUMN account_id INTEGER NOT NULL DEFAULT 1`，旧数据归入默认账号「我」。
+- 支持新建（含头像配色）、改名、删除（连带清空该账号任务）；最后一个账号不允许删除。
+
+## 设置项（全部真实生效）
+
+| 设置 | 取值范围 | 作用点 |
+|---|---|---|
+| 新建任务默认象限 | 四象限之一 | 打开「新建任务」时的初值 |
+| 任务排序 | 最新创建 / 截止优先 / 重要优先 | 每格列表与卡片清单的排序 |
+| 外观 | 跟随系统 / 浅色 / 深色 | `ApplicationContext.setColorMode()`，启动前先应用避免闪烁 |
+| 顶栏显示今日完成 | 开 / 关 | 顶栏副标题 |
+| 大卡片显示条数 | 2 / 3 / 5 | 6\*4 卡片的清单行数 |
+| 数据 | 清理已完成 / 清空本账号 | 数据库删除 |
 
 ## 工程结构
 
 ```
 quadrant-todo-harmony/
-├── AppScope/                      # 应用级配置与图标
+├── AppScope/                        # 应用级配置与图标
 ├── entry/src/main/
-│   ├── module.json5               # 模块配置（EntryAbility、页面、设备类型）
+│   ├── module.json5                 # 模块配置（Ability / Form 扩展 / 页面 / 设备类型）
+│   ├── resources/base/profile/
+│   │   ├── main_pages.json          # 页面路由
+│   │   └── form_config.json         # 卡片声明（4*4、6*4）
 │   └── ets/
-│       ├── entryability/EntryAbility.ets   # 应用入口
-│       ├── pages/Index.ets                 # 主界面（看板 + 编辑面板 + 归类尺子）
-│       ├── model/TaskItem.ets              # 数据模型与四象限元数据
-│       ├── data/TaskRepository.ets         # relationalStore 持久化（单例）
-│       └── common/DateUtil.ets             # 日期工具（逾期/今天/明天判断）
-├── preview/quadrant-todo-preview.html      # 网页交互原型（预览用，非交付主体）
-└── tools/gen_icon.py                       # 图标生成脚本（纯标准库，可重复执行）
+│       ├── entryability/EntryAbility.ets        # 应用入口（启动前应用外观设置）
+│       ├── entryformability/EntryFormAbility.ets# 卡片提供者（onAddForm / onUpdateForm）
+│       ├── pages/Index.ets                      # 主界面（看板 / 编辑 / 账号 / 设置 / 尺子 / 已完成）
+│       ├── widget/WidgetData.ets                # 卡片数据构建（与主界面共用仓储）
+│       ├── widget/pages/Widget4x4.ets           # 4*4 看板卡片
+│       ├── widget/pages/Widget6x4.ets           # 6*4 清单卡片
+│       ├── model/TaskItem.ets                   # 任务模型与四象限元数据
+│       ├── model/Account.ets                    # 账号模型与头像配色
+│       ├── model/AppSettings.ets                # 设置模型与选项元数据
+│       ├── data/TaskRepository.ets              # relationalStore 持久化（按账号维度）
+│       ├── data/AccountStore.ets                # 账号 CRUD 与切换
+│       ├── data/SettingsStore.ets               # 设置读写
+│       ├── data/PrefStore.ets                   # preferences 封装
+│       ├── data/FormStore.ets                   # 卡片 formId 登记
+│       ├── data/WidgetBridge.ets                # 主界面 → 卡片的主动刷新
+│       └── common/DateUtil.ets                  # 日期工具（逾期/今天/明天判断）
+├── preview/quadrant-todo-preview.html           # 网页交互原型（含账号、设置、卡片预览）
+└── tools/gen_icon.py                            # 图标生成脚本（纯标准库，可重复执行）
 ```
 
 ## 构建运行
@@ -83,12 +131,14 @@ quadrant-todo-harmony/
 
 - **配色**与参考版一致：四格底色 `q1~q4`、强调蓝 `accent`、危险红 `danger`，浅色/深色两套资源，通过 `$r('app.color.*')` 引用，系统切换深色模式时自动生效。
 - **交互**：卡片单击进编辑、长按删确认；四格输入框回车或「＋」即快速入库；「归类尺子」与「编辑」均为底部抽屉，符合移动端习惯。
-- **数据**：本地 RDB 表 `task`，`completed` 标记完成（不物理删除，可查「今日完成」统计），「清理已完成」提供显式清理入口。
+- **数据**：本地 RDB 表 `task`，`account_id` 做账号隔离，`completed` 标记完成（不物理删除，可查「今日完成」统计），「清理已完成」提供显式清理入口。
+- **卡片与界面同源**：`WidgetData.build()` 与主界面走同一个 `TaskRepository`，卡片只做展示，不做写入，避免两套逻辑漂移。
 - **图标**：`tools/gen_icon.py` 生成 1024px 圆角四格图标，改色板后重跑脚本即可换肤。
 
 ## 后续路线（可选增量）
 
 1. **微软 To Do 同步**：`@ohos.net.http` + Web 组件实现 OAuth 2.0 PKCE；四个象限映射为四个 Graph 列表；写操作走乐观更新。需要 Azure 应用注册（SPA 重定向改为 `msauth://` 回调）。
-2. **桌面小组件**：Form 卡片展示「重要紧急」剩余项。
+2. **卡片内交互**：`postCardAction` 的 `message` 动作 + `onFormEvent` 支持在卡片上直接勾选完成任务。
 3. **提醒**：reminderAgentManager 对 `dueAt` 设置系统提醒。
 4. **跨象限拖拽**：用 `onDragStart` / `onDrop` 替换当前的编辑面板改象限。
+5. **账号云同步**：接华为云 DB 或自建服务，实现多设备同账号同步（当前账号体系是纯本地）。

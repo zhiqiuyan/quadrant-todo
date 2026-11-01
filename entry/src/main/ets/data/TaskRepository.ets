@@ -1,15 +1,17 @@
 import { relationalStore } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
 import { TaskItem } from '../model/TaskItem';
+import { SORT_DUE, SORT_IMPORTANT } from '../model/AppSettings';
 
 const TABLE: string = 'task';
 const COLUMNS: string[] = [
-  'id', 'title', 'quadrant', 'due_at', 'important', 'completed', 'created_at', 'updated_at'
+  'id', 'account_id', 'title', 'quadrant', 'due_at', 'important', 'completed', 'created_at', 'updated_at'
 ];
 
 const SQL_CREATE: string =
   'CREATE TABLE IF NOT EXISTS task (' +
   'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
+  'account_id INTEGER NOT NULL DEFAULT 1, ' +
   'title TEXT NOT NULL, ' +
   'quadrant INTEGER NOT NULL DEFAULT 1, ' +
   'due_at INTEGER NOT NULL DEFAULT 0, ' +
@@ -18,13 +20,18 @@ const SQL_CREATE: string =
   'created_at INTEGER NOT NULL, ' +
   'updated_at INTEGER NOT NULL)';
 
+/** 旧版本（无 account_id）升级用；列已存在时会抛错，忽略即可 */
+const SQL_MIGRATE_ACCOUNT: string = 'ALTER TABLE task ADD COLUMN account_id INTEGER NOT NULL DEFAULT 1';
+const SQL_INDEX_ACCOUNT: string = 'CREATE INDEX IF NOT EXISTS idx_task_account ON task(account_id, completed)';
+
 /**
  * 任务仓储层：封装 relationalStore 的全部读写。
- * 单例 + 懒初始化，页面只需 await TaskRepository.getInstance().init(context) 一次。
+ * 单例 + 懒初始化；账号切换通过 useAccount() 设置当前维度的 account_id。
  */
 export class TaskRepository {
   private static instance: TaskRepository = new TaskRepository();
   private store: relationalStore.RdbStore | undefined = undefined;
+  private accountId: number = 1;
 
   static getInstance(): TaskRepository {
     return TaskRepository.instance;
@@ -42,10 +49,25 @@ export class TaskRepository {
     try {
       store = await relationalStore.getRdbStore(context, config);
       await store.executeSql(SQL_CREATE);
+      try {
+        await store.executeSql(SQL_MIGRATE_ACCOUNT);
+      } catch (migrateErr) {
+        // 列已存在：说明是新库或已完成迁移，无需处理
+      }
+      await store.executeSql(SQL_INDEX_ACCOUNT);
     } catch (err) {
       throw new Error(`初始化数据库失败：${(err as Error).message}`);
     }
     this.store = store;
+  }
+
+  /** 切换数据维度：之后所有读写都只针对该账号 */
+  useAccount(accountId: number): void {
+    this.accountId = accountId;
+  }
+
+  currentAccountId(): number {
+    return this.accountId;
   }
 
   private db(): relationalStore.RdbStore {
@@ -53,6 +75,13 @@ export class TaskRepository {
       throw new Error('数据库尚未初始化，请先调用 init()');
     }
     return this.store;
+  }
+
+  /** 当前账号维度的谓词，避免每条查询重复写过滤条件 */
+  private predicate(): relationalStore.RdbPredicates {
+    const predicates: relationalStore.RdbPredicates = new relationalStore.RdbPredicates(TABLE);
+    predicates.equalTo('account_id', this.accountId);
+    return predicates;
   }
 
   private async runQuery(predicates: relationalStore.RdbPredicates): Promise<TaskItem[]> {
@@ -86,17 +115,42 @@ export class TaskRepository {
     return result;
   }
 
-  /** 未完成的任务，按创建时间倒序（新任务在上） */
-  async listActive(): Promise<TaskItem[]> {
-    const predicates: relationalStore.RdbPredicates = new relationalStore.RdbPredicates(TABLE);
+  /**
+   * 未完成的任务。
+   * sortMode：0 最新创建 / 1 截止优先 / 2 重要优先。
+   * 「截止优先」把有截止日的排前面，无截止日的按创建时间兜底。
+   */
+  async listActive(sortMode: number): Promise<TaskItem[]> {
+    const predicates: relationalStore.RdbPredicates = this.predicate();
     predicates.equalTo('completed', 0);
     predicates.orderByDesc('created_at');
-    return this.runQuery(predicates);
+    const list: TaskItem[] = await this.runQuery(predicates);
+    if (sortMode === SORT_DUE) {
+      list.sort((a: TaskItem, b: TaskItem) => {
+        const aHas: boolean = a.dueAt > 0;
+        const bHas: boolean = b.dueAt > 0;
+        if (aHas !== bHas) {
+          return aHas ? -1 : 1;
+        }
+        if (aHas && a.dueAt !== b.dueAt) {
+          return a.dueAt < b.dueAt ? -1 : 1;
+        }
+        return b.createdAt - a.createdAt;
+      });
+    } else if (sortMode === SORT_IMPORTANT) {
+      list.sort((a: TaskItem, b: TaskItem) => {
+        if (a.important !== b.important) {
+          return a.important ? -1 : 1;
+        }
+        return b.createdAt - a.createdAt;
+      });
+    }
+    return list;
   }
 
   /** 已完成的任务，按更新时间倒序 */
   async listCompleted(limit: number): Promise<TaskItem[]> {
-    const predicates: relationalStore.RdbPredicates = new relationalStore.RdbPredicates(TABLE);
+    const predicates: relationalStore.RdbPredicates = this.predicate();
     predicates.equalTo('completed', 1);
     predicates.orderByDesc('updated_at');
     predicates.limitAs(limit);
@@ -105,7 +159,7 @@ export class TaskRepository {
 
   /** 指定时间之后完成的任务数量 */
   async countCompletedSince(ts: number): Promise<number> {
-    const predicates: relationalStore.RdbPredicates = new relationalStore.RdbPredicates(TABLE);
+    const predicates: relationalStore.RdbPredicates = this.predicate();
     predicates.equalTo('completed', 1);
     predicates.greaterThanOrEqualTo('updated_at', ts);
     let count: number = 0;
@@ -132,6 +186,7 @@ export class TaskRepository {
   async insert(title: string, quadrant: number, dueAt: number, important: boolean): Promise<number> {
     const now: number = Date.now();
     const values: relationalStore.ValuesBucket = {
+      'account_id': this.accountId,
       'title': title,
       'quadrant': quadrant,
       'due_at': dueAt,
@@ -156,7 +211,7 @@ export class TaskRepository {
       'important': important ? 1 : 0,
       'updated_at': Date.now()
     };
-    const predicates: relationalStore.RdbPredicates = new relationalStore.RdbPredicates(TABLE);
+    const predicates: relationalStore.RdbPredicates = this.predicate();
     predicates.equalTo('id', id);
     try {
       await this.db().update(values, predicates);
@@ -170,7 +225,7 @@ export class TaskRepository {
       'completed': completed ? 1 : 0,
       'updated_at': Date.now()
     };
-    const predicates: relationalStore.RdbPredicates = new relationalStore.RdbPredicates(TABLE);
+    const predicates: relationalStore.RdbPredicates = this.predicate();
     predicates.equalTo('id', id);
     try {
       await this.db().update(values, predicates);
@@ -180,7 +235,7 @@ export class TaskRepository {
   }
 
   async remove(id: number): Promise<void> {
-    const predicates: relationalStore.RdbPredicates = new relationalStore.RdbPredicates(TABLE);
+    const predicates: relationalStore.RdbPredicates = this.predicate();
     predicates.equalTo('id', id);
     try {
       await this.db().delete(predicates);
@@ -189,14 +244,35 @@ export class TaskRepository {
     }
   }
 
-  /** 清理全部已完成任务 */
+  /** 清理当前账号的全部已完成任务 */
   async clearCompleted(): Promise<number> {
-    const predicates: relationalStore.RdbPredicates = new relationalStore.RdbPredicates(TABLE);
+    const predicates: relationalStore.RdbPredicates = this.predicate();
     predicates.equalTo('completed', 1);
     try {
       return await this.db().delete(predicates);
     } catch (err) {
       throw new Error(`清理已完成任务失败：${(err as Error).message}`);
+    }
+  }
+
+  /** 清空当前账号的全部任务（含未完成），设置面板里的「清空本账号」 */
+  async clearAll(): Promise<number> {
+    const predicates: relationalStore.RdbPredicates = this.predicate();
+    try {
+      return await this.db().delete(predicates);
+    } catch (err) {
+      throw new Error(`清空任务失败：${(err as Error).message}`);
+    }
+  }
+
+  /** 删除指定账号的全部任务（账号被删除时调用，与当前账号维度无关） */
+  async clearAccount(accountId: number): Promise<void> {
+    const predicates: relationalStore.RdbPredicates = new relationalStore.RdbPredicates(TABLE);
+    predicates.equalTo('account_id', accountId);
+    try {
+      await this.db().delete(predicates);
+    } catch (err) {
+      throw new Error(`删除账号数据失败：${(err as Error).message}`);
     }
   }
 }

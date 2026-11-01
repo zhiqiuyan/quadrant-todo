@@ -1,11 +1,20 @@
-import { common } from '@kit.AbilityKit';
+import { common, ConfigurationConstant } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { QuadrantMeta, QUADRANTS, TaskItem, Q1 } from '../model/TaskItem';
+import { Account, accountInitial, avatarColor, AVATAR_COLORS } from '../model/Account';
+import {
+  AppSettings, COLOR_MODE_OPTIONS, MODE_DARK, MODE_LIGHT, MODE_SYSTEM, SettingOption,
+  SORT_OPTIONS, WIDGET_LINE_OPTIONS
+} from '../model/AppSettings';
 import { TaskRepository } from '../data/TaskRepository';
+import { AccountStore } from '../data/AccountStore';
+import { SettingsStore } from '../data/SettingsStore';
+import { WidgetBridge } from '../data/WidgetBridge';
 import { DateUtil } from '../common/DateUtil';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
+const APP_VERSION: string = '1.1.0';
 
 @Entry
 @Component
@@ -14,6 +23,17 @@ struct Index {
   @State tasks: TaskItem[] = [];
   @State ready: boolean = false;
   @State completedToday: number = 0;
+
+  /** 账号与设置 */
+  @State account: Account = new Account();
+  @State accounts: Account[] = [];
+  @State settings: AppSettings = new AppSettings();
+  @State showAccount: boolean = false;
+  @State showSettings: boolean = false;
+  @State newName: string = '';
+  @State newColorIndex: number = 0;
+  @State renameId: number = 0;
+  @State renameText: string = '';
 
   /** 编辑面板 */
   @State showEditor: boolean = false;
@@ -38,6 +58,8 @@ struct Index {
   @State inputQ3: string = '';
   @State inputQ4: string = '';
 
+  private ctx: common.UIAbilityContext | undefined = undefined;
+
   aboutToAppear(): void {
     this.boot();
   }
@@ -48,7 +70,17 @@ struct Index {
     try {
       const context: common.UIAbilityContext =
         this.getUIContext().getHostContext() as common.UIAbilityContext;
-      await TaskRepository.getInstance().init(context);
+      this.ctx = context;
+      await AccountStore.init(context);
+      await SettingsStore.init(context);
+      this.settings = SettingsStore.current();
+      this.accounts = AccountStore.all();
+      this.account = AccountStore.active();
+
+      const repo: TaskRepository = TaskRepository.getInstance();
+      await repo.init(context);
+      repo.useAccount(this.account.id);
+      this.applyColorMode(this.settings.colorMode);
       await this.reload();
       this.ready = true;
     } catch (err) {
@@ -59,7 +91,7 @@ struct Index {
 
   private async reload(): Promise<void> {
     try {
-      this.tasks = await TaskRepository.getInstance().listActive();
+      this.tasks = await TaskRepository.getInstance().listActive(this.settings.sortMode);
       this.completedToday = await TaskRepository.getInstance().countCompletedSince(DateUtil.todayStart());
       if (this.showDone) {
         await this.loadDone();
@@ -67,6 +99,12 @@ struct Index {
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'reload failed: %{public}s', (err as Error).message);
     }
+  }
+
+  /** 任何写操作之后：刷新界面 + 推送桌面卡片 */
+  private async afterChange(): Promise<void> {
+    await this.reload();
+    await WidgetBridge.refreshAll(this.ctx);
   }
 
   private async loadDone(): Promise<void> {
@@ -85,7 +123,7 @@ struct Index {
   private async restoreTask(item: TaskItem): Promise<void> {
     try {
       await TaskRepository.getInstance().setCompleted(item.id, false);
-      await this.reload();
+      await this.afterChange();
     } catch (err) {
       this.toast('恢复失败：' + (err as Error).message);
     }
@@ -148,10 +186,207 @@ struct Index {
   }
 
   private subtitle(): string {
+    const parts: string[] = [this.account.name];
     if (this.tasks.length === 0) {
-      return '把事放进格子里，脑子就空出来了';
+      parts.push('把事放进格子里，脑子就空出来了');
+    } else {
+      parts.push(`${this.tasks.length} 项待办`);
+      if (this.settings.showCompletedToday) {
+        parts.push(`今日完成 ${this.completedToday}`);
+      }
     }
-    return `${this.tasks.length} 项待办 · 今日完成 ${this.completedToday}`;
+    return parts.join(' · ');
+  }
+
+  /* ==================== 账号 ==================== */
+
+  private async switchAccount(id: number): Promise<void> {
+    if (id === this.account.id) {
+      this.showAccount = false;
+      return;
+    }
+    try {
+      await AccountStore.switchTo(id);
+      this.account = AccountStore.active();
+      TaskRepository.getInstance().useAccount(this.account.id);
+      this.accounts = AccountStore.all();
+      this.showAccount = false;
+      await this.afterChange();
+      this.toast(`已切换到「${this.account.name}」`);
+    } catch (err) {
+      this.toast('切换失败：' + (err as Error).message);
+    }
+  }
+
+  private async createAccount(): Promise<void> {
+    const name: string = this.newName.trim();
+    if (name.length === 0) {
+      this.toast('请输入账号名称');
+      return;
+    }
+    try {
+      const created: Account = await AccountStore.create(name, this.newColorIndex);
+      this.newName = '';
+      this.newColorIndex = (created.colorIndex + 1) % AVATAR_COLORS.length;
+      this.accounts = AccountStore.all();
+      await this.switchAccount(created.id);
+    } catch (err) {
+      this.toast('创建失败：' + (err as Error).message);
+    }
+  }
+
+  private async commitRename(id: number): Promise<void> {
+    const name: string = this.renameText.trim();
+    if (name.length === 0) {
+      this.toast('名称不能为空');
+      return;
+    }
+    try {
+      await AccountStore.rename(id, name);
+      this.accounts = AccountStore.all();
+      this.account = AccountStore.active();
+      this.renameId = 0;
+      this.renameText = '';
+      await WidgetBridge.refreshAll(this.ctx);
+    } catch (err) {
+      this.toast('重命名失败：' + (err as Error).message);
+    }
+  }
+
+  private confirmDeleteAccount(acc: Account): void {
+    this.getUIContext().showAlertDialog({
+      title: '删除账号',
+      message: `将删除「${acc.name}」及其全部任务，不可恢复。`,
+      autoCancel: true,
+      primaryButton: {
+        value: '取消',
+        action: () => {
+        }
+      },
+      secondaryButton: {
+        value: '删除',
+        fontColor: $r('app.color.danger'),
+        action: () => {
+          this.doDeleteAccount(acc);
+        }
+      }
+    });
+  }
+
+  private async doDeleteAccount(acc: Account): Promise<void> {
+    try {
+      const removed: boolean = await AccountStore.remove(acc.id);
+      if (!removed) {
+        this.toast('至少保留一个账号');
+        return;
+      }
+      const repo: TaskRepository = TaskRepository.getInstance();
+      await repo.clearAccount(acc.id);
+      this.account = AccountStore.active();
+      repo.useAccount(this.account.id);
+      this.accounts = AccountStore.all();
+      await this.afterChange();
+      this.toast('账号已删除');
+    } catch (err) {
+      this.toast('删除失败：' + (err as Error).message);
+    }
+  }
+
+  /* ==================== 设置 ==================== */
+
+  private applyColorMode(mode: number): void {
+    if (this.ctx === undefined) {
+      return;
+    }
+    let target: ConfigurationConstant.ColorMode = ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET;
+    if (mode === MODE_DARK) {
+      target = ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+    } else if (mode === MODE_LIGHT) {
+      target = ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT;
+    }
+    try {
+      this.ctx.getApplicationContext().setColorMode(target);
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'setColorMode failed: %{public}s', (err as Error).message);
+    }
+  }
+
+  private async saveSettings(next: AppSettings, appearanceChanged: boolean): Promise<void> {
+    const previous: AppSettings = this.settings;
+    this.settings = next;
+    try {
+      await SettingsStore.save(next);
+    } catch (err) {
+      this.toast('保存设置失败：' + (err as Error).message);
+      return;
+    }
+    if (appearanceChanged) {
+      this.applyColorMode(next.colorMode);
+    }
+    if (previous.sortMode !== next.sortMode) {
+      await this.reload();
+    }
+    await WidgetBridge.refreshAll(this.ctx);
+  }
+
+  private changeQuadrantSettings(key: number): void {
+    const next: AppSettings = this.settings.copy();
+    next.defaultQuadrant = key;
+    this.saveSettings(next, false);
+  }
+
+  private changeSortMode(key: number): void {
+    const next: AppSettings = this.settings.copy();
+    next.sortMode = key;
+    this.saveSettings(next, false);
+  }
+
+  private changeColorMode(key: number): void {
+    const next: AppSettings = this.settings.copy();
+    next.colorMode = key;
+    this.saveSettings(next, true);
+  }
+
+  private changeWidgetLines(key: number): void {
+    const next: AppSettings = this.settings.copy();
+    next.widgetLines = key;
+    this.saveSettings(next, false);
+  }
+
+  private toggleShowDone(isOn: boolean): void {
+    const next: AppSettings = this.settings.copy();
+    next.showCompletedToday = isOn;
+    this.saveSettings(next, false);
+  }
+
+  private confirmClearAll(): void {
+    this.getUIContext().showAlertDialog({
+      title: '清空本账号',
+      message: `将删除「${this.account.name}」下的全部任务（含未完成），不可恢复。`,
+      autoCancel: true,
+      primaryButton: {
+        value: '取消',
+        action: () => {
+        }
+      },
+      secondaryButton: {
+        value: '清空',
+        fontColor: $r('app.color.danger'),
+        action: () => {
+          this.doClearAll();
+        }
+      }
+    });
+  }
+
+  private async doClearAll(): Promise<void> {
+    try {
+      await TaskRepository.getInstance().clearAll();
+      await this.afterChange();
+      this.toast('已清空');
+    } catch (err) {
+      this.toast('清空失败：' + (err as Error).message);
+    }
   }
 
   /* ==================== 操作 ==================== */
@@ -164,7 +399,7 @@ struct Index {
     try {
       await TaskRepository.getInstance().insert(title, quadrant, 0, false);
       this.setInput(quadrant, '');
-      await this.reload();
+      await this.afterChange();
     } catch (err) {
       this.toast('添加失败：' + (err as Error).message);
     }
@@ -173,7 +408,7 @@ struct Index {
   private async toggle(item: TaskItem): Promise<void> {
     try {
       await TaskRepository.getInstance().setCompleted(item.id, !item.completed);
-      await this.reload();
+      await this.afterChange();
     } catch (err) {
       this.toast('更新失败：' + (err as Error).message);
     }
@@ -190,7 +425,7 @@ struct Index {
     } else {
       this.editingId = 0;
       this.draftTitle = '';
-      this.draftQuadrant = Q1;
+      this.draftQuadrant = this.settings.defaultQuadrant;
       this.draftDue = 0;
       this.draftImportant = false;
       this.draftDate = new Date();
@@ -213,7 +448,7 @@ struct Index {
         await repo.insert(title, this.draftQuadrant, this.draftDue, this.draftImportant);
       }
       this.showEditor = false;
-      await this.reload();
+      await this.afterChange();
     } catch (err) {
       this.toast('保存失败：' + (err as Error).message);
     }
@@ -243,7 +478,7 @@ struct Index {
     try {
       await TaskRepository.getInstance().remove(id);
       this.showEditor = false;
-      await this.reload();
+      await this.afterChange();
     } catch (err) {
       this.toast('删除失败：' + (err as Error).message);
     }
@@ -257,7 +492,8 @@ struct Index {
     this.getUIContext().showAlertDialog({
       title: '清理已完成',
       message: '将永久删除全部已完成任务，是否继续？',
-      autoCancel: true,      primaryButton: {
+      autoCancel: true,
+      primaryButton: {
         value: '取消',
         action: () => {
         }
@@ -275,7 +511,7 @@ struct Index {
   private async doClearCompleted(): Promise<void> {
     try {
       await TaskRepository.getInstance().clearCompleted();
-      await this.reload();
+      await this.afterChange();
       this.toast('已清理');
     } catch (err) {
       this.toast('清理失败：' + (err as Error).message);
@@ -296,44 +532,80 @@ struct Index {
   /* ==================== 视图 ==================== */
 
   @Builder
+  AvatarView(acc: Account, size: number) {
+    Text(accountInitial(acc.name))
+      .fontSize(size * 0.42)
+      .fontWeight(FontWeight.Medium)
+      .fontColor('#FFFFFF')
+      .width(size)
+      .height(size)
+      .textAlign(TextAlign.Center)
+      .borderRadius(size / 2)
+      .backgroundColor(avatarColor(acc.colorIndex))
+  }
+
+  @Builder
   Header() {
     Row() {
+      Stack() {
+        this.AvatarView(this.account, 34)
+      }
+      .onClick(() => {
+        this.showAccount = true;
+      })
+
       Column() {
         Text('四象限待办')
-          .fontSize(20)
+          .fontSize(19)
           .fontWeight(FontWeight.Bold)
           .fontColor($r('app.color.fg'))
         Text(this.subtitle())
-          .fontSize(11)
+          .fontSize(10)
           .fontColor($r('app.color.muted'))
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
           .margin({ top: 3 })
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
+      .margin({ left: 9 })
 
       Text('尺子')
-        .fontSize(12)
+        .fontSize(11)
         .fontColor($r('app.color.accent'))
-        .padding({ left: 10, right: 10, top: 7, bottom: 7 })
+        .padding({ left: 9, right: 9, top: 6, bottom: 6 })
         .backgroundColor($r('app.color.accent_soft'))
-        .borderRadius(14)
+        .borderRadius(13)
         .onClick(() => {
           this.showRuler = true;
         })
 
       Text('已完成')
-        .fontSize(12)
+        .fontSize(11)
         .fontColor($r('app.color.fg'))
-        .padding({ left: 10, right: 10, top: 7, bottom: 7 })
+        .padding({ left: 9, right: 9, top: 6, bottom: 6 })
         .backgroundColor($r('app.color.card'))
-        .borderRadius(14)
-        .margin({ left: 6 })
+        .borderRadius(13)
+        .margin({ left: 5 })
         .onClick(() => {
           this.openDone();
         })
+
+      Text('⚙')
+        .fontSize(15)
+        .fontColor($r('app.color.fg'))
+        .width(30)
+        .height(28)
+        .textAlign(TextAlign.Center)
+        .backgroundColor($r('app.color.card'))
+        .borderRadius(13)
+        .margin({ left: 5 })
+        .onClick(() => {
+          this.showSettings = true;
+        })
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 10 })
+    .padding({ left: 14, right: 14, top: 12, bottom: 8 })
   }
 
   @Builder
@@ -797,16 +1069,6 @@ struct Index {
               .fontColor($r('app.color.muted'))
               .lineHeight(19)
               .width('100%')
-
-            Text('清理已完成任务')
-              .fontSize(12)
-              .fontColor($r('app.color.danger'))
-              .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-              .backgroundColor($r('app.color.bg'))
-              .borderRadius(12)
-              .onClick(() => {
-                this.confirmClearCompleted();
-              })
           }
           .alignItems(HorizontalAlign.Start)
           .width('100%')
@@ -815,9 +1077,33 @@ struct Index {
         .width('100%')
         .layoutWeight(1)
         .scrollBar(BarState.Off)
+
+        Row({ space: 10 }) {
+          Text('清理已完成')
+            .fontSize(12)
+            .fontColor($r('app.color.danger'))
+            .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+            .backgroundColor($r('app.color.bg'))
+            .borderRadius(12)
+            .onClick(() => {
+              this.confirmClearCompleted();
+            })
+          Text('桌面卡片')
+            .fontSize(12)
+            .fontColor($r('app.color.accent'))
+            .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+            .backgroundColor($r('app.color.accent_soft'))
+            .borderRadius(12)
+            .onClick(() => {
+              this.showRuler = false;
+              this.showSettings = true;
+            })
+        }
+        .width('100%')
+        .margin({ top: 12 })
       }
       .width('100%')
-      .height('72%')
+      .height('62%')
       .padding({ left: 18, right: 18, top: 18, bottom: 22 })
       .backgroundColor($r('app.color.card'))
       .borderRadius({ topLeft: 20, topRight: 20 })
@@ -922,6 +1208,464 @@ struct Index {
     .height('100%')
   }
 
+  @Builder
+  AccountPanel() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor($r('app.color.scrim'))
+        .onClick(() => {
+          this.showAccount = false;
+        })
+
+      Column() {
+        Row() {
+          Text('账号')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.fg'))
+          Blank()
+          Text('✕')
+            .fontSize(16)
+            .fontColor($r('app.color.muted'))
+            .padding(6)
+            .onClick(() => {
+              this.showAccount = false;
+            })
+        }
+        .width('100%')
+
+        Text('每个账号有独立的四象限清单，数据只存在本机。')
+          .fontSize(11)
+          .fontColor($r('app.color.muted'))
+          .width('100%')
+          .margin({ top: 4 })
+
+        Scroll() {
+          Column({ space: 8 }) {
+            ForEach(this.accounts, (acc: Account) => {
+              Column() {
+                Row() {
+                  this.AvatarView(acc, 32)
+                  Column() {
+                    if (this.renameId === acc.id) {
+                      TextInput({ text: this.renameText })
+                        .fontSize(13)
+                        .fontColor($r('app.color.fg'))
+                        .height(32)
+                        .backgroundColor($r('app.color.bg'))
+                        .borderRadius(8)
+                        .padding({ left: 8, right: 8 })
+                        .onChange((value: string) => {
+                          this.renameText = value;
+                        })
+                        .onSubmit(() => {
+                          this.commitRename(acc.id);
+                        })
+                    } else {
+                      Text(acc.name)
+                        .fontSize(13)
+                        .fontWeight(FontWeight.Medium)
+                        .fontColor($r('app.color.fg'))
+                        .maxLines(1)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    }
+                    Text(acc.id === this.account.id ? '使用中' : '点击切换')
+                      .fontSize(10)
+                      .fontColor(acc.id === this.account.id ? $r('app.color.accent') : $r('app.color.muted'))
+                      .margin({ top: 2 })
+                  }
+                  .alignItems(HorizontalAlign.Start)
+                  .layoutWeight(1)
+                  .margin({ left: 10 })
+
+                  if (this.renameId === acc.id) {
+                    Text('确定')
+                      .fontSize(11)
+                      .fontColor($r('app.color.on_accent'))
+                      .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                      .backgroundColor($r('app.color.accent'))
+                      .borderRadius(10)
+                      .onClick(() => {
+                        this.commitRename(acc.id);
+                      })
+                  } else {
+                    Text('改名')
+                      .fontSize(11)
+                      .fontColor($r('app.color.accent'))
+                      .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                      .backgroundColor($r('app.color.accent_soft'))
+                      .borderRadius(10)
+                      .onClick(() => {
+                        this.renameId = acc.id;
+                        this.renameText = acc.name;
+                      })
+                    if (this.accounts.length > 1) {
+                      Text('删除')
+                        .fontSize(11)
+                        .fontColor($r('app.color.danger'))
+                        .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                        .backgroundColor($r('app.color.bg'))
+                        .borderRadius(10)
+                        .margin({ left: 6 })
+                        .onClick(() => {
+                          this.confirmDeleteAccount(acc);
+                        })
+                    }
+                  }
+                }
+                .width('100%')
+              }
+              .width('100%')
+              .padding(10)
+              .borderRadius(12)
+              .backgroundColor(acc.id === this.account.id ? $r('app.color.accent_soft') : $r('app.color.bg'))
+              .onClick(() => {
+                if (this.renameId !== acc.id) {
+                  this.switchAccount(acc.id);
+                }
+              })
+            }, (acc: Account) => `acc-${acc.id}`)
+
+            Column({ space: 8 }) {
+              Text('新建账号')
+                .fontSize(12)
+                .fontWeight(FontWeight.Medium)
+                .fontColor($r('app.color.fg'))
+                .width('100%')
+
+              TextInput({ placeholder: '账号名称，例如「工作」「家庭」', text: this.newName })
+                .fontSize(13)
+                .fontColor($r('app.color.fg'))
+                .placeholderColor($r('app.color.muted'))
+                .height(40)
+                .backgroundColor($r('app.color.bg'))
+                .borderRadius(10)
+                .padding({ left: 10, right: 10 })
+                .onChange((value: string) => {
+                  this.newName = value;
+                })
+                .onSubmit(() => {
+                  this.createAccount();
+                })
+
+              Row({ space: 8 }) {
+                ForEach(AVATAR_COLORS, (color: string, index: number) => {
+                  Text(accountInitial(this.newName))
+                    .fontSize(11)
+                    .fontColor('#FFFFFF')
+                    .width(26)
+                    .height(26)
+                    .textAlign(TextAlign.Center)
+                    .borderRadius(13)
+                    .backgroundColor(color)
+                    .border({
+                      width: this.newColorIndex === index ? 2 : 0,
+                      color: $r('app.color.fg')
+                    })
+                    .onClick(() => {
+                      this.newColorIndex = index;
+                    })
+                }, (color: string, index: number) => `color-${color}-${index}`)
+              }
+              .width('100%')
+
+              Button() {
+                Text('创建并切换')
+                  .fontSize(14)
+                  .fontColor($r('app.color.on_accent'))
+              }
+              .width('100%')
+              .height(42)
+              .backgroundColor($r('app.color.accent'))
+              .onClick(() => {
+                this.createAccount();
+              })
+            }
+            .width('100%')
+            .padding(10)
+            .borderRadius(12)
+            .backgroundColor($r('app.color.bg'))
+            .margin({ top: 4 })
+          }
+          .width('100%')
+          .padding({ top: 10, bottom: 10 })
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .scrollBar(BarState.Off)
+      }
+      .width('100%')
+      .height('80%')
+      .padding({ left: 18, right: 18, top: 18, bottom: 22 })
+      .backgroundColor($r('app.color.card'))
+      .borderRadius({ topLeft: 20, topRight: 20 })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  SectionTitle(text: string) {
+    Text(text)
+      .fontSize(12)
+      .fontWeight(FontWeight.Medium)
+      .fontColor($r('app.color.fg'))
+      .width('100%')
+      .margin({ top: 16 })
+  }
+
+  @Builder
+  HintText(text: string) {
+    Text(text)
+      .fontSize(10)
+      .fontColor($r('app.color.muted'))
+      .width('100%')
+      .margin({ top: 4 })
+  }
+
+  @Builder
+  SettingsPanel() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor($r('app.color.scrim'))
+        .onClick(() => {
+          this.showSettings = false;
+        })
+
+      Column() {
+        Row() {
+          Text('设置')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.fg'))
+          Blank()
+          Text('✕')
+            .fontSize(16)
+            .fontColor($r('app.color.muted'))
+            .padding(6)
+            .onClick(() => {
+              this.showSettings = false;
+            })
+        }
+        .width('100%')
+
+        Scroll() {
+          Column() {
+            this.SectionTitle('当前账号')
+            Row() {
+              this.AvatarView(this.account, 30)
+              Column() {
+                Text(this.account.name)
+                  .fontSize(13)
+                  .fontColor($r('app.color.fg'))
+                Text('切换 / 新建账号')
+                  .fontSize(10)
+                  .fontColor($r('app.color.muted'))
+                  .margin({ top: 2 })
+              }
+              .alignItems(HorizontalAlign.Start)
+              .layoutWeight(1)
+              .margin({ left: 9 })
+
+              Text('管理')
+                .fontSize(11)
+                .fontColor($r('app.color.accent'))
+                .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                .backgroundColor($r('app.color.accent_soft'))
+                .borderRadius(10)
+                .onClick(() => {
+                  this.showSettings = false;
+                  this.showAccount = true;
+                })
+            }
+            .width('100%')
+            .padding(10)
+            .borderRadius(12)
+            .backgroundColor($r('app.color.bg'))
+            .margin({ top: 8 })
+
+            this.SectionTitle('新建任务的默认象限')
+            Flex({ wrap: FlexWrap.Wrap }) {
+              ForEach(QUADRANTS, (meta: QuadrantMeta) => {
+                Text(meta.name)
+                  .fontSize(12)
+                  .fontColor(this.settings.defaultQuadrant === meta.key ?
+                    $r('app.color.on_accent') : $r('app.color.fg'))
+                  .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                  .backgroundColor(this.settings.defaultQuadrant === meta.key ?
+                    $r('app.color.accent') : this.quadBg(meta.key))
+                  .borderRadius(12)
+                  .margin({ right: 8, top: 8 })
+                  .onClick(() => {
+                    this.changeQuadrantSettings(meta.key);
+                  })
+              }, (meta: QuadrantMeta) => `def-${meta.key}`)
+            }
+            .width('100%')
+
+            this.SectionTitle('任务排序')
+            Flex({ wrap: FlexWrap.Wrap }) {
+              ForEach(SORT_OPTIONS, (opt: SettingOption) => {
+                Text(opt.label)
+                  .fontSize(12)
+                  .fontColor(this.settings.sortMode === opt.key ?
+                    $r('app.color.on_accent') : $r('app.color.fg'))
+                  .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                  .backgroundColor(this.settings.sortMode === opt.key ?
+                    $r('app.color.accent') : $r('app.color.bg'))
+                  .borderRadius(12)
+                  .margin({ right: 8, top: 8 })
+                  .onClick(() => {
+                    this.changeSortMode(opt.key);
+                  })
+              }, (opt: SettingOption) => `sort-${opt.key}`)
+            }
+            .width('100%')
+
+            this.SectionTitle('外观')
+            Flex({ wrap: FlexWrap.Wrap }) {
+              ForEach(COLOR_MODE_OPTIONS, (opt: SettingOption) => {
+                Text(opt.label)
+                  .fontSize(12)
+                  .fontColor(this.settings.colorMode === opt.key ?
+                    $r('app.color.on_accent') : $r('app.color.fg'))
+                  .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                  .backgroundColor(this.settings.colorMode === opt.key ?
+                    $r('app.color.accent') : $r('app.color.bg'))
+                  .borderRadius(12)
+                  .margin({ right: 8, top: 8 })
+                  .onClick(() => {
+                    this.changeColorMode(opt.key);
+                  })
+              }, (opt: SettingOption) => `mode-${opt.key}`)
+            }
+            .width('100%')
+            this.HintText('切换后立即生效；「跟随系统」与系统深色模式同步。')
+
+            Row() {
+              Text('顶栏显示今日完成')
+                .fontSize(13)
+                .fontColor($r('app.color.fg'))
+                .layoutWeight(1)
+              Toggle({ type: ToggleType.Switch, isOn: this.settings.showCompletedToday })
+                .selectedColor($r('app.color.accent'))
+                .onChange((isOn: boolean) => {
+                  this.toggleShowDone(isOn);
+                })
+            }
+            .width('100%')
+            .margin({ top: 16 })
+
+            this.SectionTitle('大卡片（6*4）显示条数')
+            Flex({ wrap: FlexWrap.Wrap }) {
+              ForEach(WIDGET_LINE_OPTIONS, (opt: SettingOption) => {
+                Text(opt.label)
+                  .fontSize(12)
+                  .fontColor(this.settings.widgetLines === opt.key ?
+                    $r('app.color.on_accent') : $r('app.color.fg'))
+                  .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                  .backgroundColor(this.settings.widgetLines === opt.key ?
+                    $r('app.color.accent') : $r('app.color.bg'))
+                  .borderRadius(12)
+                  .margin({ right: 8, top: 8 })
+                  .onClick(() => {
+                    this.changeWidgetLines(opt.key);
+                  })
+              }, (opt: SettingOption) => `lines-${opt.key}`)
+            }
+            .width('100%')
+            this.HintText('长按桌面空白处 → 卡片 → 四象限待办，可选 4*4（方）与 6*4（宽幅，平板 / 2in1）。')
+
+            this.SectionTitle('数据')
+            Row({ space: 10 }) {
+              Text('清理已完成')
+                .fontSize(12)
+                .fontColor($r('app.color.fg'))
+                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                .backgroundColor($r('app.color.bg'))
+                .borderRadius(12)
+                .onClick(() => {
+                  this.confirmClearCompleted();
+                })
+              Text('清空本账号')
+                .fontSize(12)
+                .fontColor($r('app.color.danger'))
+                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                .backgroundColor($r('app.color.bg'))
+                .borderRadius(12)
+                .onClick(() => {
+                  this.confirmClearAll();
+                })
+            }
+            .width('100%')
+            .margin({ top: 8 })
+
+            this.SectionTitle('关于')
+            Column({ space: 6 }) {
+              Row() {
+                Text('版本')
+                  .fontSize(12)
+                  .fontColor($r('app.color.muted'))
+                  .layoutWeight(1)
+                Text(APP_VERSION)
+                  .fontSize(12)
+                  .fontColor($r('app.color.fg'))
+              }
+              .width('100%')
+
+              Row() {
+                Text('存储')
+                  .fontSize(12)
+                  .fontColor($r('app.color.muted'))
+                  .layoutWeight(1)
+                Text('本机数据库（RDB）')
+                  .fontSize(12)
+                  .fontColor($r('app.color.fg'))
+              }
+              .width('100%')
+
+              Row() {
+                Text('卡片尺寸')
+                  .fontSize(12)
+                  .fontColor($r('app.color.muted'))
+                  .layoutWeight(1)
+                Text('4*4 / 6*4')
+                  .fontSize(12)
+                  .fontColor($r('app.color.fg'))
+              }
+              .width('100%')
+
+              Text('任务与账号均不上传，卸载应用即清除全部数据。')
+                .fontSize(10)
+                .fontColor($r('app.color.muted'))
+                .width('100%')
+                .margin({ top: 4 })
+            }
+            .width('100%')
+            .padding({ top: 8, bottom: 20 })
+            .alignItems(HorizontalAlign.Start)
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .scrollBar(BarState.Off)
+      }
+      .width('100%')
+      .height('86%')
+      .padding({ left: 18, right: 18, top: 18, bottom: 22 })
+      .backgroundColor($r('app.color.card'))
+      .borderRadius({ topLeft: 20, topRight: 20 })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
   build() {
     Stack() {
       Column() {
@@ -956,6 +1700,14 @@ struct Index {
 
       if (this.showDone) {
         this.DonePanel()
+      }
+
+      if (this.showAccount) {
+        this.AccountPanel()
+      }
+
+      if (this.showSettings) {
+        this.SettingsPanel()
       }
     }
     .width('100%')

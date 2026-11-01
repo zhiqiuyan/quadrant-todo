@@ -53,6 +53,22 @@
       "value": "#2A2D33"
     },
     {
+      "name": "q1_dot",
+      "value": "#F87171"
+    },
+    {
+      "name": "q2_dot",
+      "value": "#60A5FA"
+    },
+    {
+      "name": "q3_dot",
+      "value": "#FBBF24"
+    },
+    {
+      "name": "q4_dot",
+      "value": "#6B7280"
+    },
+    {
       "name": "scrim",
       "value": "#99000000"
     },

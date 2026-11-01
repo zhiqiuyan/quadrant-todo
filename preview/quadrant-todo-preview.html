@@ -7,18 +7,27 @@
 <!--
   这是 HarmonyOS 版「四象限待办」的网页交互原型，仅用于在没有安装 DevEco Studio 时
   快速预览视觉与交互。真正的交付物是 entry/src/main/ets 下的 ArkTS 工程。
+  原型与 ArkTS 版共用同一套视觉与数据结构：账号隔离、设置项、两种桌面卡片。
 -->
 <style>
 :root{
   --bg:#f5f6f8;--card:#fff;--fg:#1d1f23;--muted:#6b7280;--border:#e3e5e9;--accent:#2563eb;
   --accent-soft:#e8effd;--danger:#dc2626;--on-accent:#fff;
   --q1:#fee2e2;--q2:#dbeafe;--q3:#fef3c7;--q4:#e7e9ec;--scrim:rgba(16,20,24,.4);
+  --q1dot:#ef4444;--q2dot:#2563eb;--q3dot:#d97706;--q4dot:#9ca3af;
+}
+:root[data-theme="dark"]{
+  --bg:#14161a;--card:#1f2228;--fg:#e8eaed;--muted:#9aa0a6;--border:#30343b;--accent:#60a5fa;
+  --accent-soft:#1e2a3d;--danger:#f87171;
+  --q1:#3b1d1d;--q2:#1b2a40;--q3:#3a3016;--q4:#2a2d33;--scrim:rgba(0,0,0,.6);
+  --q1dot:#f87171;--q2dot:#60a5fa;--q3dot:#fbbf24;--q4dot:#6b7280;
 }
 @media (prefers-color-scheme:dark){
-  :root{
+  :root:not([data-theme="light"]){
     --bg:#14161a;--card:#1f2228;--fg:#e8eaed;--muted:#9aa0a6;--border:#30343b;--accent:#60a5fa;
     --accent-soft:#1e2a3d;--danger:#f87171;
     --q1:#3b1d1d;--q2:#1b2a40;--q3:#3a3016;--q4:#2a2d33;--scrim:rgba(0,0,0,.6);
+    --q1dot:#f87171;--q2dot:#60a5fa;--q3dot:#fbbf24;--q4dot:#6b7280;
   }
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -27,12 +36,15 @@ body{margin:0;font-family:-apple-system,"PingFang SC","HarmonyOS Sans SC","Micro
 .phone{width:100%;max-width:420px;background:var(--bg);color:var(--fg);min-height:100vh;display:flex;flex-direction:column;position:relative}
 @media (min-width:460px){.phone{margin:24px 0;border-radius:32px;min-height:calc(100vh - 48px);box-shadow:0 20px 60px #0008;overflow:hidden}}
 
-header{display:flex;align-items:center;gap:10px;padding:16px 16px 10px}
-header .t{flex:1}
-header h1{font-size:20px;margin:0;font-weight:700}
-header .sub{font-size:11px;color:var(--muted);margin-top:3px}
-.chip{font-size:12px;color:var(--accent);background:var(--accent-soft);padding:7px 12px;border-radius:14px;border:none;cursor:pointer;font-family:inherit}
+header{display:flex;align-items:center;gap:8px;padding:14px 14px 8px}
+header .t{flex:1;min-width:0}
+header h1{font-size:19px;margin:0;font-weight:700}
+header .sub{font-size:10px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.avatar{width:34px;height:34px;min-width:34px;border-radius:17px;color:#fff;display:flex;align-items:center;
+  justify-content:center;font-size:14px;border:none;cursor:pointer;font-family:inherit}
+.chip{font-size:11px;color:var(--accent);background:var(--accent-soft);padding:6px 9px;border-radius:13px;border:none;cursor:pointer;font-family:inherit}
 .chip.ghost{color:var(--fg);background:var(--card);border:1px solid var(--border)}
+.chip.icon{width:30px;height:28px;padding:0;font-size:15px;color:var(--fg);background:var(--card);border:1px solid var(--border)}
 
 .board{flex:1;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:8px;padding:0 12px;min-height:0}
 .quad{border-radius:16px;padding:8px;display:flex;flex-direction:column;min-height:150px}
@@ -47,7 +59,6 @@ header .sub{font-size:11px;color:var(--muted);margin-top:3px}
 .card.done .cb{background:var(--accent);border-color:var(--accent)}
 .card .body{flex:1;min-width:0}
 .card .title{font-size:13px;word-break:break-word}
-.card.done .title{color:var(--muted);text-decoration:line-through}
 .card .meta{font-size:10px;color:var(--muted);margin-top:2px;display:flex;gap:3px}
 .card .meta .over{color:var(--danger);font-weight:600}
 .card .meta .star{color:var(--danger)}
@@ -63,17 +74,19 @@ footer .fab{width:100%;height:44px;border:none;border-radius:22px;background:var
 .sheet.open{display:block}
 .sheet .scrim{position:absolute;inset:0;background:var(--scrim)}
 .sheet .panel{position:absolute;left:0;right:0;bottom:0;background:var(--card);border-radius:20px 20px 0 0;padding:18px 18px 24px;max-height:88%;overflow:auto}
-.sheet h2{font-size:16px;margin:0 0 12px}
+.sheet h2{font-size:16px;margin:0 0 4px}
 .sheet .x{float:right;color:var(--muted);cursor:pointer;padding:0 4px}
 .sheet label{display:block;font-size:12px;color:var(--muted);margin:14px 0 8px}
-.sheet input[type=text]{width:100%;font:inherit;font-size:15px;color:var(--fg);background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:11px 10px;outline:none;box-sizing:border-box}
+.sheet .sec{font-size:12px;font-weight:600;margin:16px 0 8px}
+.sheet .hintline{font-size:10px;color:var(--muted);margin-top:6px;line-height:1.6}
+.sheet input[type=text]{width:100%;font:inherit;font-size:14px;color:var(--fg);background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px;outline:none;box-sizing:border-box}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
 .chips button{font:inherit;font-size:12px;color:var(--fg);background:var(--bg);border:none;border-radius:12px;padding:6px 12px;cursor:pointer}
 .chips button.on{background:var(--accent);color:var(--on-accent)}
 .chips button.q1{background:var(--q1)}.chips button.q2{background:var(--q2)}.chips button.q3{background:var(--q3)}.chips button.q4{background:var(--q4)}
 .chips button.q1.on,.chips button.q2.on,.chips button.q3.on,.chips button.q4.on{background:var(--accent)}
 .togglerow{display:flex;align-items:center;justify-content:space-between;margin-top:16px;font-size:13px}
-.switch{width:44px;height:26px;border-radius:13px;background:var(--border);position:relative;cursor:pointer;transition:background .2s}
+.switch{width:44px;height:26px;border-radius:13px;background:var(--border);position:relative;cursor:pointer;transition:background .2s;min-width:44px}
 .switch.on{background:var(--accent)}
 .switch::after{content:'';position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:10px;background:#fff;transition:left .2s}
 .switch.on::after{left:21px}
@@ -87,17 +100,49 @@ footer .fab{width:100%;height:44px;border:none;border-radius:22px;background:var
 .ruler .row b{width:88px;min-width:88px}
 .ruler .row span{color:var(--muted)}
 .ruler .clear{font-size:12px;color:var(--danger);background:var(--bg);border:none;border-radius:12px;padding:8px 12px;cursor:pointer;margin-top:6px}
+
+/* 账号行 */
+.acct{display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;background:var(--bg);margin-bottom:8px;cursor:pointer}
+.acct.on{background:var(--accent-soft)}
+.acct .nm{font-size:13px;font-weight:600}
+.acct .st{font-size:10px;color:var(--muted);margin-top:2px}
+.acct.on .st{color:var(--accent)}
+.acct .ops{display:flex;gap:6px}
+.colordots{display:flex;gap:8px;margin:8px 0}
+.colordots span{width:26px;height:26px;border-radius:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px}
+
+/* 卡片预览 */
+.cards{display:flex;gap:14px;flex-wrap:wrap;padding:6px 0 10px}
+.wcard{border-radius:20px;padding:10px;background:var(--card);border:1px solid var(--border);display:flex;flex-direction:column;gap:6px}
+.w44{width:250px;height:250px}
+.w64{width:360px;height:250px;flex-direction:row;gap:12px}
+.wcard .whead{display:flex;align-items:center;gap:5px}
+.wcard .whead .nm{font-size:11px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wcard .whead .tt{font-size:10px;color:var(--muted)}
+.wgrid{flex:1;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:6px;min-height:0}
+.wcell{border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.wcell .n{font-size:19px;font-weight:700}
+.wcell .l{font-size:9px;color:var(--muted)}
+.wleft{width:38%;display:flex;flex-direction:column;gap:6px}
+.wright{flex:1;display:flex;flex-direction:column;gap:5px;min-width:0}
+.wline{display:flex;align-items:center;gap:6px;font-size:12px;height:24px}
+.wdot{width:5px;height:5px;min-width:5px;border-radius:3px}
+.wline .tx{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wline .lb{font-size:9px;color:var(--muted)}
+.wfoot{font-size:8px;color:var(--muted);opacity:.7}
 </style>
 </head>
 <body>
 <div class="phone">
   <header>
+    <button class="avatar" id="avatar" onclick="openSheet('account')"></button>
     <div class="t">
       <h1>四象限待办</h1>
       <div class="sub" id="sub"></div>
     </div>
-    <button class="chip" onclick="openRuler()">尺子</button>
+    <button class="chip" onclick="openSheet('ruler')">尺子</button>
     <button class="chip ghost" onclick="openDone()">已完成</button>
+    <button class="chip icon" onclick="openSheet('settings')">⚙</button>
   </header>
 
   <div class="board" id="board"></div>
@@ -125,16 +170,16 @@ footer .fab{width:100%;height:44px;border:none;border-radius:22px;background:var
       <div class="togglerow">标记为重要 <div class="switch" id="fImp" onclick="toggleImp()"></div></div>
       <div class="btnrow">
         <button class="del" id="fDel" onclick="askDelete()">删除</button>
-        <button class="save" onclick="save()">保存</button>
+        <button class="save" onclick="saveTask()">保存</button>
       </div>
     </div>
   </div>
 
   <!-- 已完成 -->
   <div class="sheet" id="done">
-    <div class="scrim" onclick="closeDone()"></div>
+    <div class="scrim" onclick="closeSheet('done')"></div>
     <div class="panel">
-      <span class="x" onclick="closeDone()">✕</span>
+      <span class="x" onclick="closeSheet('done')">✕</span>
       <h2>已完成</h2>
       <div id="doneList"></div>
     </div>
@@ -142,9 +187,9 @@ footer .fab{width:100%;height:44px;border:none;border-radius:22px;background:var
 
   <!-- 归类尺子 -->
   <div class="sheet" id="ruler">
-    <div class="scrim" onclick="closeRuler()"></div>
+    <div class="scrim" onclick="closeSheet('ruler')"></div>
     <div class="panel ruler">
-      <span class="x" onclick="closeRuler()">✕</span>
+      <span class="x" onclick="closeSheet('ruler')">✕</span>
       <h2>归类尺子</h2>
       <p><b>重要：</b>会影响钱、岗位、口碑、健康、长期可积累技能的，一律算重要。判断标准是「半年后还重不重要」，而不是「现在有没有人催」。</p>
       <p><b>不重要：</b>可代劳、可拒绝、对上面几项几乎无影响的事务性琐事。这类事做得再漂亮，也不会改变你的处境。</p>
@@ -158,6 +203,82 @@ footer .fab{width:100%;height:44px;border:none;border-radius:22px;background:var
       <button class="clear" onclick="clearDone()">清理已完成任务</button>
     </div>
   </div>
+
+  <!-- 账号 -->
+  <div class="sheet" id="account">
+    <div class="scrim" onclick="closeSheet('account')"></div>
+    <div class="panel">
+      <span class="x" onclick="closeSheet('account')">✕</span>
+      <h2>账号</h2>
+      <div class="hintline">每个账号有独立的四象限清单，数据只存在本机。</div>
+      <div style="margin-top:12px" id="acctList"></div>
+      <div class="sec">新建账号</div>
+      <input type="text" id="newName" placeholder="账号名称，例如「工作」「家庭」">
+      <div class="colordots" id="colorDots"></div>
+      <button class="chip" style="width:100%;height:40px;background:var(--accent);color:var(--on-accent);border-radius:10px;font-size:14px" onclick="createAccount()">创建并切换</button>
+    </div>
+  </div>
+
+  <!-- 设置 -->
+  <div class="sheet" id="settings">
+    <div class="scrim" onclick="closeSheet('settings')"></div>
+    <div class="panel">
+      <span class="x" onclick="closeSheet('settings')">✕</span>
+      <h2>设置</h2>
+
+      <div class="sec">当前账号</div>
+      <div class="acct on" onclick="openSheet('account')">
+        <span class="avatar" id="setAvatar" style="width:30px;height:30px;min-width:30px;font-size:12px"></span>
+        <div style="flex:1"><div class="nm" id="setName"></div><div class="st">切换 / 新建账号</div></div>
+        <button class="chip">管理</button>
+      </div>
+
+      <div class="sec">新建任务的默认象限</div>
+      <div class="chips" id="setQuad"></div>
+
+      <div class="sec">任务排序</div>
+      <div class="chips" id="setSort"></div>
+
+      <div class="sec">外观</div>
+      <div class="chips" id="setMode"></div>
+      <div class="hintline">切换后立即生效；「跟随系统」与系统深色模式同步。</div>
+
+      <div class="togglerow">顶栏显示今日完成 <div class="switch" id="setDone" onclick="toggleShowDone()"></div></div>
+
+      <div class="sec">大卡片（6*4）显示条数</div>
+      <div class="chips" id="setLines"></div>
+      <div class="hintline">鸿蒙卡片尺寸枚举只有 1*1 / 1*2 / 2*2 / 2*3 / 2*4 / 3*3 / 4*4 / 6*4，没有 4*6；大卡片用 6*4（宽幅，平板与 2in1 上可用）。</div>
+
+      <div class="sec">桌面卡片预览</div>
+      <div class="cards" id="cardPreview"></div>
+      <button class="chip" style="width:100%;height:38px;border-radius:10px" onclick="openSheet('widgets')">放大查看两种卡片</button>
+
+      <div class="sec">数据</div>
+      <div class="chips">
+        <button onclick="clearDone()">清理已完成</button>
+        <button style="color:var(--danger)" onclick="clearAll()">清空本账号</button>
+      </div>
+
+      <div class="sec">关于</div>
+      <div style="font-size:12px;line-height:2">
+        <div style="display:flex"><span style="flex:1;color:var(--muted)">版本</span><span>1.1.0</span></div>
+        <div style="display:flex"><span style="flex:1;color:var(--muted)">存储</span><span>本机数据库（RDB）</span></div>
+        <div style="display:flex"><span style="flex:1;color:var(--muted)">卡片尺寸</span><span>4*4 / 6*4</span></div>
+      </div>
+      <div class="hintline">任务与账号均不上传，卸载应用即清除全部数据。</div>
+    </div>
+  </div>
+
+  <!-- 卡片放大 -->
+  <div class="sheet" id="widgets">
+    <div class="scrim" onclick="closeSheet('widgets')"></div>
+    <div class="panel">
+      <span class="x" onclick="closeSheet('widgets')">✕</span>
+      <h2>桌面卡片</h2>
+      <div class="hintline">长按桌面空白处 → 卡片 → 四象限待办，可选 4*4 与 6*4。</div>
+      <div class="cards" id="cardPreview2" style="margin-top:8px"></div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -167,31 +288,91 @@ const QUADS = [
   {key:3,name:'紧急不重要',hint:'委托 / 缩短 / 批量处理',cls:'q3'},
   {key:4,name:'不重要不紧急',hint:'删掉，或只在闲时碰',cls:'q4'},
 ];
-const KEY = 'quadrant.tasks.v1';
-let tasks = JSON.parse(localStorage.getItem(KEY) || '[]');
-let editing = null;   // null=新建，否则为任务 id
-let draft = {};
+const COLORS = ['#2563eb','#7c3aed','#db2777','#ea580c','#059669','#0891b2','#4b5563','#b45309'];
+const SORTS = [{k:0,l:'最新创建'},{k:1,l:'截止优先'},{k:2,l:'重要优先'}];
+const MODES = [{k:0,l:'跟随系统'},{k:1,l:'浅色'},{k:2,l:'深色'}];
+const LINES = [{k:2,l:'2 条'},{k:3,l:'3 条'},{k:5,l:'5 条'}];
+const KEY = 'quadrant.data.v2';
 
-const save = { all(){ localStorage.setItem(KEY, JSON.stringify(tasks)); } };
 const $ = s => document.querySelector(s);
 const startOfDay = ts => { const d = new Date(ts); d.setHours(0,0,0,0); return d.getTime(); };
 const dayOffset = n => startOfDay(Date.now()) + n * 86400000;
+
+function seed(){
+  return {
+    accounts:[{id:1,name:'我',colorIndex:0}],
+    activeId:1,
+    newColor:1,
+    tasks:{'1':[
+      {id:1,title:'把季度汇报的结论页写完',quadrant:1,dueAt:dayOffset(0),important:true,completed:false,createdAt:2,updatedAt:2},
+      {id:2,title:'系统学习 ArkTS 状态管理',quadrant:2,dueAt:0,important:true,completed:false,createdAt:3,updatedAt:3},
+      {id:3,title:'回复项目群里的排期确认',quadrant:3,dueAt:dayOffset(1),important:false,completed:false,createdAt:4,updatedAt:4},
+      {id:4,title:'整理收藏夹里的旧文章',quadrant:4,dueAt:0,important:false,completed:false,createdAt:5,updatedAt:5},
+    ]},
+    settings:{defaultQuadrant:1,sortMode:0,colorMode:0,showDone:true,widgetLines:3}
+  };
+}
+let db = JSON.parse(localStorage.getItem(KEY) || 'null') || seed();
+if (!db.settings) db.settings = seed().settings;
+if (!db.newColor) db.newColor = 1;
+
+let editing = null, draft = {};
+
+const saveAll = () => localStorage.setItem(KEY, JSON.stringify(db));
+const account = () => db.accounts.find(a => a.id === db.activeId) || db.accounts[0];
+const tasksOf = () => db.tasks[db.activeId] || [];
+const setTasks = list => { db.tasks[db.activeId] = list; };
+
 function dueLabel(ts){
   if (!ts) return '';
   const diff = Math.round((startOfDay(ts) - startOfDay(Date.now())) / 86400000);
   if (diff === 0) return '今天';
   if (diff === 1) return '明天';
   if (diff === 2) return '后天';
-  if (diff < 0) return `逾期 ${-diff} 天`;
+  if (diff === -1) return '逾期 1 天';
+  if (diff < -1) return `逾期 ${-diff} 天`;
   const d = new Date(ts);
   return `${d.getMonth()+1}月${d.getDate()}日`;
 }
+const isOverdue = ts => ts > 0 && startOfDay(ts) < startOfDay(Date.now());
+
+function activeSorted(){
+  const list = tasksOf().filter(t => !t.completed);
+  if (db.settings.sortMode === 1){
+    list.sort((a,b) => {
+      const ah = a.dueAt > 0, bh = b.dueAt > 0;
+      if (ah !== bh) return ah ? -1 : 1;
+      if (ah && a.dueAt !== b.dueAt) return a.dueAt - b.dueAt;
+      return b.createdAt - a.createdAt;
+    });
+  } else if (db.settings.sortMode === 2){
+    list.sort((a,b) => (a.important !== b.important ? (a.important ? -1 : 1) : b.createdAt - a.createdAt));
+  }
+  return list;
+}
+
+function applyTheme(){
+  const m = db.settings.colorMode;
+  document.documentElement.dataset.theme = m === 2 ? 'dark' : m === 1 ? 'light' : '';
+}
 
 function render(){
-  const active = tasks.filter(t => !t.completed);
-  const doneToday = tasks.filter(t => t.completed && t.updatedAt >= startOfDay(Date.now())).length;
-  $('#sub').textContent = active.length === 0 ? '把事放进格子里，脑子就空出来了'
-    : `${active.length} 项待办 · 今日完成 ${doneToday}`;
+  applyTheme();
+  const acc = account();
+  const active = activeSorted();
+  const doneToday = tasksOf().filter(t => t.completed && t.updatedAt >= startOfDay(Date.now())).length;
+  const av = $('#avatar');
+  av.textContent = acc.name.slice(0,1) || '我';
+  av.style.background = COLORS[acc.colorIndex % COLORS.length];
+
+  const parts = [acc.name];
+  if (active.length === 0) parts.push('把事放进格子里，脑子就空出来了');
+  else {
+    parts.push(`${active.length} 项待办`);
+    if (db.settings.showDone) parts.push(`今日完成 ${doneToday}`);
+  }
+  $('#sub').textContent = parts.join(' · ');
+
   $('#board').innerHTML = QUADS.map(q => {
     const items = active.filter(t => t.quadrant === q.key);
     const cards = items.map(t => `
@@ -201,7 +382,7 @@ function render(){
           <div class="title">${escapeHtml(t.title)}</div>
           ${(t.dueAt || t.important) ? `<div class="meta">
             ${t.important ? '<span class="star">★</span>' : ''}
-            ${t.dueAt ? `<span class="${startOfDay(t.dueAt) < startOfDay(Date.now()) ? 'over' : ''}">${dueLabel(t.dueAt)}</span>` : ''}
+            ${t.dueAt ? `<span class="${isOverdue(t.dueAt) ? 'over' : ''}">${dueLabel(t.dueAt)}</span>` : ''}
           </div>` : ''}
         </div>
       </div>`).join('');
@@ -209,85 +390,79 @@ function render(){
       <div class="hd"><b>${q.name}</b><span class="n">${items.length}</span></div>
       ${items.length ? `<div class="list">${cards}</div>` : `<div class="hint">${q.hint}</div>`}
       <div class="addrow">
-        <input placeholder="添加任务…" onkeydown="if(event.key==='Enter')quickAdd(${q.key},this)"
-               oninput="window._qa${q.key}=this.value" value="">
-        <button onclick="quickAdd(${q.key}, this.previousElementSibling)">＋</button>
+        <input placeholder="添加任务…" onkeydown="if(event.key==='Enter')quickAdd(${q.key})" oninput="window._qa${q.key}=this.value" value="">
+        <button onclick="quickAdd(${q.key})">＋</button>
       </div>
     </div>`;
   }).join('');
+
+  renderSettings();
+  renderCards();
 }
 
-function escapeHtml(s){
-  return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-}
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
-function quickAdd(key, input){
+/* ---------- 任务 ---------- */
+function quickAdd(key){
   const title = (window['_qa' + key] || '').trim();
   if (!title) return;
-  tasks.unshift({id: Date.now(), title, quadrant: key, dueAt: 0, important: false, completed: false,
+  const list = tasksOf();
+  list.unshift({id: Date.now(), title, quadrant: key, dueAt: 0, important: false, completed: false,
     createdAt: Date.now(), updatedAt: Date.now()});
-  save.all(); render();
+  setTasks(list); saveAll(); window['_qa' + key] = ''; render();
 }
-
 function toggle(id){
-  const t = tasks.find(x => x.id === id);
+  const t = tasksOf().find(x => x.id === id);
   if (!t) return;
   t.completed = !t.completed; t.updatedAt = Date.now();
-  save.all(); render();
+  saveAll(); render();
 }
-
 function openEditor(id){
   editing = typeof id === 'number' ? id : null;
-  const t = editing !== null ? tasks.find(x => x.id === editing) : null;
-  draft = t ? {...t} : {title:'', quadrant:1, dueAt:0, important:false};
+  const t = editing !== null ? tasksOf().find(x => x.id === editing) : null;
+  draft = t ? {...t} : {title:'', quadrant: db.settings.defaultQuadrant, dueAt:0, important:false};
   $('#edTitle').textContent = t ? '编辑任务' : '新建任务';
   $('#fTitle').value = draft.title;
   $('#fDel').style.display = t ? '' : 'none';
   $('#fImp').classList.toggle('on', draft.important);
-  $('#fQuad').innerHTML = QUADS.map(q =>
-    `<button class="${q.cls}${draft.quadrant === q.key ? ' on' : ''}" onclick="pickQuad(${q.key})">${q.name}</button>`).join('');
+  renderQuadChips();
   $('#fDueLabel').textContent = draft.dueAt ? dueLabel(draft.dueAt) : '未设置';
-  $('#editor').classList.add('open');
-  if (!t) setTimeout(() => $('#fTitle').focus(), 50);
+  openSheet('editor');
+  if (!t) setTimeout(() => $('#fTitle').focus(), 60);
 }
-function pickQuad(k){ draft.quadrant = k; openEditorQuads(); }
-function openEditorQuads(){
+function renderQuadChips(){
   $('#fQuad').innerHTML = QUADS.map(q =>
     `<button class="${q.cls}${draft.quadrant === q.key ? ' on' : ''}" onclick="pickQuad(${q.key})">${q.name}</button>`).join('');
 }
+function pickQuad(k){ draft.quadrant = k; renderQuadChips(); }
 function setDue(n){
   draft.dueAt = n < 0 ? 0 : dayOffset(n);
   $('#fDueLabel').textContent = draft.dueAt ? dueLabel(draft.dueAt) : '未设置';
 }
 function toggleImp(){ draft.important = !draft.important; $('#fImp').classList.toggle('on', draft.important); }
-function closeEditor(){ $('#editor').classList.remove('open'); }
-function save(){
+function closeEditor(){ closeSheet('editor'); }
+function saveTask(){
   const title = $('#fTitle').value.trim();
   if (!title) { $('#fTitle').focus(); return; }
+  const list = tasksOf();
   if (editing !== null){
-    const t = tasks.find(x => x.id === editing);
+    const t = list.find(x => x.id === editing);
     Object.assign(t, draft, {title, updatedAt: Date.now()});
   } else {
-    tasks.unshift({id: Date.now(), title, quadrant: draft.quadrant, dueAt: draft.dueAt,
+    list.unshift({id: Date.now(), title, quadrant: draft.quadrant, dueAt: draft.dueAt,
       important: draft.important, completed: false, createdAt: Date.now(), updatedAt: Date.now()});
   }
-  save.all(); closeEditor(); render();
+  setTasks(list); saveAll(); closeEditor(); render();
 }
 function askDelete(){
-  const t = tasks.find(x => x.id === editing);
+  const t = tasksOf().find(x => x.id === editing);
   if (t && !confirm(`确定删除「${t.title}」？删除后不可恢复。`)) return;
-  tasks = tasks.filter(x => x.id !== editing);
-  save.all(); closeEditor(); render();
+  setTasks(tasksOf().filter(x => x.id !== editing));
+  saveAll(); closeEditor(); render();
 }
-function openRuler(){ $('#ruler').classList.add('open'); }
-function closeRuler(){ $('#ruler').classList.remove('open'); }
-function openDone(){
-  renderDone();
-  $('#done').classList.add('open');
-}
-function closeDone(){ $('#done').classList.remove('open'); }
+function openDone(){ renderDone(); openSheet('done'); }
 function renderDone(){
-  const done = tasks.filter(t => t.completed);
+  const done = tasksOf().filter(t => t.completed);
   $('#doneList').innerHTML = done.length === 0
     ? '<p style="color:var(--muted);font-size:12px;text-align:center;padding:40px 0">还没有已完成的任务</p>'
     : done.map(t => `<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--border)">
@@ -297,34 +472,167 @@ function renderDone(){
       </div>`).join('');
 }
 function restore(id){
-  const t = tasks.find(x => x.id === id);
+  const t = tasksOf().find(x => x.id === id);
   if (!t) return;
   t.completed = false; t.updatedAt = Date.now();
-  save.all(); render(); renderDone();
+  saveAll(); render(); renderDone();
 }
 function removeDone(id){
-  tasks = tasks.filter(x => x.id !== id);
-  save.all(); render(); renderDone();
+  setTasks(tasksOf().filter(x => x.id !== id));
+  saveAll(); render(); renderDone();
 }
 function clearDone(){
-  const n = tasks.filter(t => t.completed).length;
+  const n = tasksOf().filter(t => t.completed).length;
   if (!n) return alert('暂无可清理的已完成任务');
   if (!confirm(`将永久删除 ${n} 条已完成任务，是否继续？`)) return;
-  tasks = tasks.filter(t => !t.completed);
-  save.all(); closeRuler(); render();
+  setTasks(tasksOf().filter(t => !t.completed));
+  saveAll(); closeSheet('ruler'); render();
+}
+function clearAll(){
+  if (!confirm(`将删除「${account().name}」下的全部任务（含未完成），不可恢复。`)) return;
+  setTasks([]);
+  saveAll(); render();
 }
 
-/* 预置两条示例数据，首次打开即可感受交互 */
-if (tasks.length === 0 && !localStorage.getItem('quadrant.seeded')) {
-  tasks = [
-    {id:1,title:'把季度汇报的结论页写完',quadrant:1,dueAt:dayOffset(0),important:true,completed:false,createdAt:2,updatedAt:2},
-    {id:2,title:'系统学习 ArkTS 状态管理',quadrant:2,dueAt:0,important:true,completed:false,createdAt:3,updatedAt:3},
-    {id:3,title:'回复项目群里的排期确认',quadrant:3,dueAt:dayOffset(1),important:false,completed:false,createdAt:4,updatedAt:4},
-    {id:4,title:'整理收藏夹里的旧文章',quadrant:4,dueAt:0,important:false,completed:false,createdAt:5,updatedAt:5},
-  ];
-  localStorage.setItem('quadrant.seeded','1');
-  save.all();
+/* ---------- 账号 ---------- */
+function renderAccounts(){
+  $('#acctList').innerHTML = db.accounts.map(a => `
+    <div class="acct ${a.id === db.activeId ? 'on' : ''}">
+      <span class="avatar" style="width:32px;height:32px;min-width:32px;font-size:12px;background:${COLORS[a.colorIndex % COLORS.length]}">${escapeHtml(a.name.slice(0,1) || '我')}</span>
+      <div style="flex:1;min-width:0" onclick="switchAccount(${a.id})">
+        <div class="nm">${escapeHtml(a.name)}</div>
+        <div class="st">${a.id === db.activeId ? '使用中' : '点击切换'}</div>
+      </div>
+      <button class="chip" onclick="renameAccount(${a.id})">改名</button>
+      ${db.accounts.length > 1 ? `<button class="chip ghost" style="color:var(--danger)" onclick="deleteAccount(${a.id})">删除</button>` : ''}
+    </div>`).join('');
+  $('#colorDots').innerHTML = COLORS.map((c,i) =>
+    `<span style="background:${c};border:${db.newColor === i ? '2px solid var(--fg)' : 'none'};color:#fff">${escapeHtml(($('#newName').value || 'A').slice(0,1))}</span>`).join('');
+  Array.from($('#colorDots').children).forEach((el,i) => el.onclick = () => { db.newColor = i; saveAll(); renderAccounts(); });
 }
+function switchAccount(id){
+  if (id === db.activeId) { closeSheet('account'); return; }
+  db.activeId = id; saveAll(); closeSheet('account'); render();
+}
+function createAccount(){
+  const name = $('#newName').value.trim();
+  if (!name) return alert('请输入账号名称');
+  const id = Math.max(0, ...db.accounts.map(a => a.id)) + 1;
+  db.accounts.push({id, name, colorIndex: db.newColor});
+  db.tasks[id] = [];
+  db.newColor = (db.newColor + 1) % COLORS.length;
+  db.activeId = id;
+  $('#newName').value = '';
+  saveAll(); closeSheet('account'); render();
+}
+function renameAccount(id){
+  const a = db.accounts.find(x => x.id === id);
+  const name = prompt('账号名称', a.name);
+  if (name === null) return;
+  if (!name.trim()) return alert('名称不能为空');
+  a.name = name.trim(); saveAll(); render(); renderAccounts();
+}
+function deleteAccount(id){
+  if (db.accounts.length <= 1) return alert('至少保留一个账号');
+  const a = db.accounts.find(x => x.id === id);
+  if (!confirm(`将删除「${a.name}」及其全部任务，不可恢复。`)) return;
+  db.accounts = db.accounts.filter(x => x.id !== id);
+  delete db.tasks[id];
+  if (db.activeId === id) db.activeId = db.accounts[0].id;
+  saveAll(); render(); renderAccounts();
+}
+
+/* ---------- 设置 ---------- */
+function renderSettings(){
+  const acc = account();
+  const av = $('#setAvatar');
+  av.textContent = acc.name.slice(0,1) || '我';
+  av.style.background = COLORS[acc.colorIndex % COLORS.length];
+  $('#setName').textContent = acc.name;
+  $('#setQuad').innerHTML = QUADS.map(q =>
+    `<button class="${q.cls}${db.settings.defaultQuadrant === q.key ? ' on' : ''}" onclick="setSetting('defaultQuadrant',${q.key})">${q.name}</button>`).join('');
+  $('#setSort').innerHTML = SORTS.map(o =>
+    `<button class="${db.settings.sortMode === o.k ? 'on' : ''}" onclick="setSetting('sortMode',${o.k})">${o.l}</button>`).join('');
+  $('#setMode').innerHTML = MODES.map(o =>
+    `<button class="${db.settings.colorMode === o.k ? 'on' : ''}" onclick="setSetting('colorMode',${o.k})">${o.l}</button>`).join('');
+  $('#setLines').innerHTML = LINES.map(o =>
+    `<button class="${db.settings.widgetLines === o.k ? 'on' : ''}" onclick="setSetting('widgetLines',${o.k})">${o.l}</button>`).join('');
+  $('#setDone').classList.toggle('on', db.settings.showDone);
+}
+function setSetting(key, value){
+  db.settings[key] = value;
+  saveAll(); render();
+}
+function toggleShowDone(){ db.settings.showDone = !db.settings.showDone; saveAll(); render(); }
+
+/* ---------- 卡片预览 ---------- */
+function cardData(){
+  const active = activeSorted();
+  const counts = {1:0,2:0,3:0,4:0};
+  active.forEach(t => counts[t.quadrant]++);
+  const ordered = [];
+  const push = fn => active.forEach(t => { if (!ordered.includes(t) && fn(t)) ordered.push(t); });
+  push(t => isOverdue(t.dueAt));
+  push(t => t.dueAt > 0 && startOfDay(t.dueAt) === startOfDay(Date.now()));
+  push(t => t.important);
+  push(() => true);
+  const doneToday = tasksOf().filter(t => t.completed && t.updatedAt >= startOfDay(Date.now())).length;
+  const now = new Date();
+  return {
+    name: account().name, color: COLORS[account().colorIndex % COLORS.length],
+    total: active.length, doneToday, counts,
+    lines: ordered.slice(0, db.settings.widgetLines),
+    updated: `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')} 更新`
+  };
+}
+function cellHtml(key, label, n){
+  return `<div class="wcell" style="background:var(--q${key})"><div class="n" ${key === 4 ? 'style="color:var(--muted)"' : ''}>${n}</div><div class="l">${label}</div></div>`;
+}
+function card44(){
+  const d = cardData();
+  return `<div class="wcard w44">
+    <div class="whead"><span class="avatar" style="width:18px;height:18px;min-width:18px;font-size:10px;background:${d.color}">${escapeHtml(d.name.slice(0,1)||'我')}</span>
+      <span class="nm">${escapeHtml(d.name)}</span><span class="tt">${d.total ? d.total + ' 项' : '清空'}</span></div>
+    <div class="wgrid">
+      ${cellHtml(1,'重要紧急',d.counts[1])}${cellHtml(2,'重要不急',d.counts[2])}
+      ${cellHtml(3,'紧急不重',d.counts[3])}${cellHtml(4,'都不重要',d.counts[4])}
+    </div></div>`;
+}
+function card64(){
+  const d = cardData();
+  const lines = d.lines.length
+    ? d.lines.map(t => `<div class="wline"><span class="wdot" style="background:var(--q${t.quadrant}dot)"></span>
+        <span class="tx">${escapeHtml(t.title)}</span>${t.dueAt ? `<span class="lb">${dueLabel(t.dueAt)}</span>` : ''}</div>`).join('')
+    : '<div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px">还没有待办</div>';
+  return `<div class="wcard w64">
+    <div class="wleft">
+      <div class="whead"><span class="avatar" style="width:18px;height:18px;min-width:18px;font-size:10px;background:${d.color}">${escapeHtml(d.name.slice(0,1)||'我')}</span>
+        <span class="nm">${escapeHtml(d.name)}</span></div>
+      <div class="wgrid">
+        ${cellHtml(1,'重要紧急',d.counts[1])}${cellHtml(2,'重要不急',d.counts[2])}
+        ${cellHtml(3,'紧急不重',d.counts[3])}${cellHtml(4,'都不重要',d.counts[4])}
+      </div>
+    </div>
+    <div class="wright">
+      <div class="whead"><span class="nm">${d.total} 项待办</span><span class="tt">今日完成 ${d.doneToday}</span></div>
+      ${lines}
+      <div class="wfoot">${d.updated}</div>
+    </div></div>`;
+}
+function renderCards(){
+  const html = card44() + card64();
+  $('#cardPreview').innerHTML = html;
+  $('#cardPreview2').innerHTML = html;
+}
+
+/* ---------- 面板 ---------- */
+function openSheet(name){
+  if (name === 'account') renderAccounts();
+  if (name === 'settings') renderSettings();
+  $('#' + name).classList.add('open');
+}
+function closeSheet(name){ $('#' + name).classList.remove('open'); }
+
 render();
 </script>
 </body>

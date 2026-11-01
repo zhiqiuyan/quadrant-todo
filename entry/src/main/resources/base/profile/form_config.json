@@ -1,0 +1,44 @@
+{
+  "forms": [
+    {
+      "name": "widget_4x4",
+      "displayName": "$string:form_4x4_name",
+      "description": "$string:form_4x4_desc",
+      "src": "./ets/widget/pages/Widget4x4.ets",
+      "uiSyntax": "arkts",
+      "window": {
+        "designWidth": 720,
+        "autoDesignWidth": true
+      },
+      "colorMode": "auto",
+      "defaultDimension": "4*4",
+      "supportDimensions": [
+        "4*4"
+      ],
+      "updateEnabled": true,
+      "scheduledUpdateTime": "08:00",
+      "updateDuration": 2,
+      "isDefault": true
+    },
+    {
+      "name": "widget_6x4",
+      "displayName": "$string:form_6x4_name",
+      "description": "$string:form_6x4_desc",
+      "src": "./ets/widget/pages/Widget6x4.ets",
+      "uiSyntax": "arkts",
+      "window": {
+        "designWidth": 720,
+        "autoDesignWidth": true
+      },
+      "colorMode": "auto",
+      "defaultDimension": "6*4",
+      "supportDimensions": [
+        "6*4"
+      ],
+      "updateEnabled": true,
+      "scheduledUpdateTime": "08:00",
+      "updateDuration": 2,
+      "isDefault": false
+    }
+  ]
+}

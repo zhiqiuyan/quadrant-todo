@@ -11,6 +11,30 @@
     {
       "name": "EntryAbility_label",
       "value": "四象限待办"
+    },
+    {
+      "name": "form_label",
+      "value": "四象限待办卡片"
+    },
+    {
+      "name": "form_desc",
+      "value": "在桌面查看四象限分布与待办清单"
+    },
+    {
+      "name": "form_4x4_name",
+      "value": "四象限看板"
+    },
+    {
+      "name": "form_4x4_desc",
+      "value": "四格各有多少待办，一眼看清重心"
+    },
+    {
+      "name": "form_6x4_name",
+      "value": "待办清单"
+    },
+    {
+      "name": "form_6x4_desc",
+      "value": "四象限计数加今日优先清单（宽幅大卡片）"
     }
   ]
 }
