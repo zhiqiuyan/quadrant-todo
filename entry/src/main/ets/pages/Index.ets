@@ -1,6 +1,7 @@
 import { common, ConfigurationConstant } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { webview } from '@kit.ArkWeb';
+import { window } from '@kit.ArkUI';
 import { QuadrantMeta, QUADRANTS, TaskItem, Q1 } from '../model/TaskItem';
 import { Account, accountInitial, avatarColor, AVATAR_COLORS } from '../model/Account';
 import {
@@ -14,11 +15,13 @@ import { SettingsStore } from '../data/SettingsStore';
 import { WidgetBridge } from '../data/WidgetBridge';
 import { MsAuthService } from '../data/MsAuthService';
 import { MsSyncService } from '../data/MsSyncService';
+import { HuaweiAuthService, HuaweiIdProfile } from '../data/HuaweiAuthService';
+import { BackupService, BackupResult } from '../data/BackupService';
 import { DateUtil } from '../common/DateUtil';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.2.0';
+const APP_VERSION: string = '1.3.0';
 
 @Entry
 @Component
@@ -73,6 +76,19 @@ struct Index {
   @State msLoginUrl: string = '';
   private webCtrl: webview.WebviewController = new webview.WebviewController();
 
+  /** 华为账号与云备份 */
+  @State hwNickName: string = '';
+  @State hwAvatar: string = '';
+  @State hwOpenId: string = '';
+  @State hwBusy: boolean = false;
+  @State autoBackup: boolean = true;
+  @State lastBackupText: string = '';
+  @State backupBusy: boolean = false;
+
+  /** 沉浸式安全区避让（vp） */
+  @State topInset: number = 0;
+  @State bottomInset: number = 0;
+
   private ctx: common.UIAbilityContext | undefined = undefined;
 
   aboutToAppear(): void {
@@ -97,14 +113,40 @@ struct Index {
       repo.useAccount(this.account.id);
       this.applyColorMode(this.settings.colorMode);
       this.refreshMsState();
+      this.refreshHuaweiState();
+      this.autoBackup = BackupService.autoEnabled();
+      this.refreshBackupState();
+      this.computeInsets();
       await this.reload();
       this.ready = true;
       if (this.msConnected && MsAuthService.autoSync()) {
         this.msBackgroundSync();
       }
+      if (this.autoBackup && HuaweiAuthService.loggedIn()) {
+        this.runAutoBackup();
+      }
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'boot failed: %{public}s', (err as Error).message);
       this.toast('初始化失败：' + (err as Error).message);
+    }
+  }
+
+  /** 读取状态栏/导航条高度，内容按安全区避让，背景延伸到状态栏 */
+  private async computeInsets(): Promise<void> {
+    if (this.ctx === undefined) {
+      return;
+    }
+    try {
+      const win: window.Window = await window.getLastWindow(this.ctx);
+      const sysArea: window.AvoidArea =
+        win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
+      const navArea: window.AvoidArea =
+        win.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR);
+      this.topInset = this.getUIContext().px2vp(sysArea.topRect.height);
+      this.bottomInset = this.getUIContext().px2vp(navArea.bottomRect.height);
+    } catch (err) {
+      this.topInset = 0;
+      this.bottomInset = 0;
     }
   }
 
@@ -120,12 +162,15 @@ struct Index {
     }
   }
 
-  /** 任何写操作之后：刷新界面 + 推送桌面卡片 + 按需云同步 */
+  /** 任何写操作之后：刷新界面 + 推送桌面卡片 + 按需云同步 + 自动云备份 */
   private async afterChange(): Promise<void> {
     await this.reload();
     await WidgetBridge.refreshAll(this.ctx);
     if (this.msConnected && MsAuthService.autoSync()) {
       await this.msBackgroundSync();
+    }
+    if (this.autoBackup && this.ctx !== undefined) {
+      BackupService.autoBackup(this.ctx);
     }
   }
 
@@ -568,6 +613,103 @@ struct Index {
       return false;
     }
     return DateUtil.startOfDay(this.draftDue) === DateUtil.dayOffset(offsetDays);
+  }
+
+  /* ==================== 华为账号 ==================== */
+
+  private refreshHuaweiState(): void {
+    const profile: HuaweiIdProfile | undefined = HuaweiAuthService.stored();
+    if (profile !== undefined) {
+      this.hwOpenId = profile.openId;
+      this.hwNickName = profile.nickName;
+      this.hwAvatar = profile.avatarUri;
+    } else {
+      this.hwOpenId = '';
+      this.hwNickName = '';
+      this.hwAvatar = '';
+    }
+  }
+
+  private async hwLogin(): Promise<void> {
+    if (this.hwBusy) {
+      return;
+    }
+    this.hwBusy = true;
+    try {
+      const profile: HuaweiIdProfile = await HuaweiAuthService.login();
+      this.refreshHuaweiState();
+      this.toast(profile.nickName.length > 0 ?
+        `已登录：${profile.nickName}` : '华为账号已登录');
+      this.refreshBackupState();
+    } catch (err) {
+      this.toast((err as Error).message);
+    } finally {
+      this.hwBusy = false;
+    }
+  }
+
+  private async hwLogout(): Promise<void> {
+    try {
+      await HuaweiAuthService.logout();
+      this.refreshHuaweiState();
+      this.refreshBackupState();
+      this.toast('已退出华为账号');
+    } catch (err) {
+      this.toast((err as Error).message);
+    }
+  }
+
+  /* ==================== 云备份 ==================== */
+
+  private refreshBackupState(): void {
+    this.lastBackupText = BackupService.lastBackupText();
+  }
+
+  private async runAutoBackup(): Promise<void> {
+    if (this.ctx === undefined) {
+      return;
+    }
+    await BackupService.autoBackup(this.ctx);
+    this.refreshBackupState();
+  }
+
+  private async doBackupNow(): Promise<void> {
+    if (this.backupBusy || this.ctx === undefined) {
+      return;
+    }
+    this.backupBusy = true;
+    try {
+      const result: BackupResult = await BackupService.backup(this.ctx);
+      this.refreshBackupState();
+      this.toast(result.message);
+    } finally {
+      this.backupBusy = false;
+    }
+  }
+
+  private async doRestore(): Promise<void> {
+    if (this.backupBusy || this.ctx === undefined) {
+      return;
+    }
+    this.backupBusy = true;
+    try {
+      const result: BackupResult = await BackupService.restore(this.ctx);
+      if (result.ok) {
+        await this.afterChange();
+      }
+      this.toast(result.message);
+    } finally {
+      this.backupBusy = false;
+    }
+  }
+
+  private async toggleAutoBackup(on: boolean): Promise<void> {
+    this.autoBackup = on;
+    try {
+      await BackupService.setAutoEnabled(on);
+    } catch (err) {
+      this.toast('保存失败：' + (err as Error).message);
+    }
   }
 
   /* ==================== 微软 To Do ==================== */
@@ -1841,6 +1983,130 @@ struct Index {
             .margin({ top: 8 })
             this.HintText('四个象限对应微软 To Do 的四个同名清单，云端不存在则自动创建；冲突按最后修改时间胜出。需在 Azure 门户「应用注册」建公共客户端，回调填 nativeclient。')
 
+            this.SectionTitle('华为账号')
+            Row() {
+              if (this.hwOpenId.length > 0) {
+                if (this.hwAvatar.length > 0) {
+                  Image(this.hwAvatar)
+                    .width(34)
+                    .height(34)
+                    .borderRadius(17)
+                    .objectFit(ImageFit.Cover)
+                } else {
+                  Text(this.hwNickName.length > 0 ? this.hwNickName.substring(0, 1) : '华')
+                    .fontSize(14)
+                    .fontColor('#FFFFFF')
+                    .width(34)
+                    .height(34)
+                    .textAlign(TextAlign.Center)
+                    .borderRadius(17)
+                    .backgroundColor($r('app.color.accent'))
+                }
+                Column() {
+                  Text(this.hwNickName.length > 0 ? this.hwNickName : '已登录')
+                    .fontSize(13)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor($r('app.color.fg'))
+                  Text('华为账号已连接')
+                    .fontSize(10)
+                    .fontColor($r('app.color.muted'))
+                    .margin({ top: 2 })
+                }
+                .alignItems(HorizontalAlign.Start)
+                .layoutWeight(1)
+                .margin({ left: 9 })
+
+                Text('退出')
+                  .fontSize(11)
+                  .fontColor($r('app.color.danger'))
+                  .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                  .backgroundColor($r('app.color.bg'))
+                  .borderRadius(10)
+                  .onClick(() => {
+                    this.hwLogout();
+                  })
+              } else {
+                Column() {
+                  Text('未登录')
+                    .fontSize(13)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor($r('app.color.fg'))
+                  Text('登录后可使用云备份与云同步')
+                    .fontSize(10)
+                    .fontColor($r('app.color.muted'))
+                    .margin({ top: 2 })
+                }
+                .alignItems(HorizontalAlign.Start)
+                .layoutWeight(1)
+
+                Button() {
+                  Row({ space: 5 }) {
+                    Text('⌘')
+                      .fontSize(12)
+                      .fontColor($r('app.color.on_accent'))
+                    Text(this.hwBusy ? '登录中…' : '登录')
+                      .fontSize(12)
+                      .fontColor($r('app.color.on_accent'))
+                  }
+                }
+                .height(32)
+                .borderRadius(16)
+                .backgroundColor($r('app.color.accent'))
+                .onClick(() => {
+                  this.hwLogin();
+                })
+              }
+            }
+            .width('100%')
+            .padding(10)
+            .borderRadius(12)
+            .backgroundColor($r('app.color.card'))
+            .margin({ top: 8 })
+            this.HintText('需要 AGC「账号服务」与 module.json5 中的 client_id 配置，见 README。')
+
+            this.SectionTitle('云备份')
+            Row() {
+              Text('自动备份（改动后自动上传）')
+                .fontSize(13)
+                .fontColor($r('app.color.fg'))
+                .layoutWeight(1)
+              Toggle({ type: ToggleType.Switch, isOn: this.autoBackup })
+                .selectedColor($r('app.color.accent'))
+                .onChange((isOn: boolean) => {
+                  this.toggleAutoBackup(isOn);
+                })
+            }
+            .width('100%')
+
+            Row({ space: 8 }) {
+              Text(this.backupBusy ? '处理中…' : '立即备份')
+                .fontSize(11)
+                .fontColor($r('app.color.on_accent'))
+                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                .backgroundColor($r('app.color.accent'))
+                .borderRadius(10)
+                .onClick(() => {
+                  this.doBackupNow();
+                })
+              Text('从云端恢复')
+                .fontSize(11)
+                .fontColor($r('app.color.accent'))
+                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                .backgroundColor($r('app.color.accent_soft'))
+                .borderRadius(10)
+                .onClick(() => {
+                  this.doRestore();
+                })
+              Blank()
+              Text(this.hwOpenId.length === 0 ? '需先登录华为账号' :
+                (this.lastBackupText.length > 0 ? `上次：${this.lastBackupText}` : '尚未备份'))
+                .fontSize(10)
+                .fontColor($r('app.color.muted'))
+            }
+            .width('100%')
+            .margin({ top: 8 })
+            this.HintText('备份含全部账号的任务，上传到 AGC 云存储并以华为账号隔离；恢复时任务并入当前账号（同象限同标题去重）。')
+
             this.SectionTitle('数据')
             Row({ space: 10 }) {
               Text('清理已完成')
@@ -2020,5 +2286,8 @@ struct Index {
     }
     .width('100%')
     .height('100%')
+    .backgroundColor($r('app.color.bg'))
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+    .padding({ top: this.topInset, bottom: this.bottomInset })
   }
 }

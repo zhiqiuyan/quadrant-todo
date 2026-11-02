@@ -19,10 +19,18 @@ export default class EntryAbility extends UIAbility {
   onWindowStageCreate(windowStage: window.WindowStage): void {
     // 先把外观设置应用好，再加载页面，避免启动瞬间的浅色闪烁
     this.applyAppearance().then(() => {
-      windowStage.loadContent('pages/Index', (err) => {
+      windowStage.loadContent('pages/Index', async (err) => {
         if (err.code) {
           hilog.error(DOMAIN, TAG, 'Failed to load the content. Cause: %{public}s', JSON.stringify(err));
           return;
+        }
+        // 沉浸式：内容延伸到状态栏与导航条，页面内按安全区避让，顶栏与状态栏背景一致
+        // 状态栏图标颜色随应用 colorMode 自动适配，无需显式设置
+        try {
+          const win: window.Window = await windowStage.getMainWindow();
+          await win.setWindowLayoutFullScreen(true);
+        } catch (err2) {
+          hilog.warn(DOMAIN, TAG, 'immersive layout failed: %{public}s', (err2 as Error).message);
         }
         hilog.info(DOMAIN, TAG, 'Succeeded in loading the content.');
       });
