@@ -21,7 +21,7 @@ import { DateUtil } from '../common/DateUtil';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.4.5';
+const APP_VERSION: string = '1.4.6';
 
 interface QuoteItem {
   text: string;
@@ -2032,7 +2032,6 @@ this.GroupTitle('备份与数据')
             }
             if (this.settingsPage === 5) {
               Column() {
-this.GroupTitle('关于')
             Column({ space: 6 }) {
               Row() {
                 Text('应用')
@@ -2077,6 +2076,30 @@ this.GroupTitle('关于')
                   .fontColor($r('app.color.fg'))
               }
               .width('100%')
+
+              Row() {
+                Text('源码')
+                  .fontSize(12)
+                  .fontColor($r('app.color.muted'))
+                  .layoutWeight(1)
+                Text('GitHub · quadrant-todo')
+                  .fontSize(12)
+                  .fontColor($r('app.color.fg'))
+                  .maxLines(1)
+              }
+              .width('100%')
+
+              Text('源码说明：本应用是开源项目 quadrant-todo（github.com/jailedxiu/quadrant-todo）的 HarmonyOS 移植版，界面与数据层为 ArkTS 重写，遵循原项目开源许可，源码可自由查阅、学习与修改。')
+                .fontSize(10)
+                .fontColor($r('app.color.muted'))
+                .width('100%')
+                .margin({ top: 6 })
+
+              Text('免责条款：本应用按「现状」提供，不作任何明示或默示的担保。任务数据保存在本机，请定期使用备份功能；因设备故障、误操作、卸载或第三方服务（微软 To Do / 华为云）异常导致的数据丢失，开发者不承担任何责任。')
+                .fontSize(10)
+                .fontColor($r('app.color.muted'))
+                .width('100%')
+                .margin({ top: 4 })
 
               Text('一款本地优先的四象限任务管理应用：按「重要 / 紧急」两维把待办放进四个象限，任务默认只存在本机数据库（RDB），可选同步到微软 To Do 或备份到云端。')
                 .fontSize(10)
