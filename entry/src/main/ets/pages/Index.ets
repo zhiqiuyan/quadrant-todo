@@ -21,7 +21,31 @@ import { DateUtil } from '../common/DateUtil';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.4.4';
+const APP_VERSION: string = '1.4.5';
+
+interface QuoteItem {
+  text: string;
+  author: string;
+}
+
+const QUOTES: QuoteItem[] = [
+  { text: '千里之行，始于足下', author: '老子' },
+  { text: '不积跬步，无以至千里', author: '荀子' },
+  { text: '学而不思则罔，思而不学则殆', author: '孔子' },
+  { text: '逝者如斯夫，不舍昼夜', author: '孔子' },
+  { text: '三人行，必有我师焉', author: '孔子' },
+  { text: '天行健，君子以自强不息', author: '《周易》' },
+  { text: '业精于勤，荒于嬉', author: '韩愈' },
+  { text: '明日复明日，明日何其多', author: '钱福' },
+  { text: '少壮不努力，老大徒伤悲', author: '《长歌行》' },
+  { text: '宝剑锋从磨砺出，梅花香自苦寒来', author: '《警世贤文》' },
+  { text: '一寸光阴一寸金，寸金难买寸光阴', author: '《增广贤文》' },
+  { text: '纸上得来终觉浅，绝知此事要躬行', author: '陆游' },
+  { text: '问渠那得清如许，为有源头活水来', author: '朱熹' },
+  { text: '山重水复疑无路，柳暗花明又一村', author: '陆游' },
+  { text: '长风破浪会有时，直挂云帆济沧海', author: '李白' },
+  { text: '世上无难事，只怕有心人', author: '谚语' }
+];
 
 /**
  * 输入框独立成组件。
@@ -320,17 +344,13 @@ struct Index {
     return '';
   }
 
-  private statsLine(): string {
-    const parts: string[] = [];
-    if (this.tasks.length === 0) {
-      parts.push('把事放进格子里，脑子就空出来了');
-    } else {
-      parts.push(`${this.tasks.length} 项待办`);
-      if (this.settings.showCompletedToday) {
-        parts.push(`今日完成 ${this.completedToday}`);
-      }
-    }
-    return parts.join(' · ');
+  /** 每日一言：按当天日期从名言库中取一条（每天固定一条，自然轮换） */
+  private dailyQuote(): string {
+    const now: Date = new Date();
+    const start: Date = new Date(now.getFullYear(), 0, 1);
+    const day: number = Math.floor((now.getTime() - start.getTime()) / 86400000);
+    const q: QuoteItem = QUOTES[day % QUOTES.length];
+    return `${q.text} —— ${q.author}`;
   }
 
   /* ==================== 设置 ==================== */
@@ -385,12 +405,6 @@ struct Index {
   private changeWidgetLines(key: number): void {
     const next: AppSettings = this.settings.copy();
     next.widgetLines = key;
-    this.saveSettings(next, false);
-  }
-
-  private toggleShowDone(isOn: boolean): void {
-    const next: AppSettings = this.settings.copy();
-    next.showCompletedToday = isOn;
     this.saveSettings(next, false);
   }
 
@@ -894,22 +908,12 @@ struct Index {
   @Builder
   Header() {
     Row() {
-      Text(this.statsLine())
-        .fontSize(13)
-        .fontColor($r('app.color.fg'))
+      Text(this.dailyQuote())
+        .fontSize(12)
+        .fontColor($r('app.color.muted'))
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .layoutWeight(1)
-
-      Text('尺子')
-        .fontSize(11)
-        .fontColor($r('app.color.accent'))
-        .padding({ left: 9, right: 9, top: 6, bottom: 6 })
-        .backgroundColor($r('app.color.accent_soft'))
-        .borderRadius(13)
-        .onClick(() => {
-          this.showRuler = true;
-        })
 
       Text('已完成')
         .fontSize(11)
@@ -1587,7 +1591,7 @@ struct Index {
       .fontSize(11)
       .fontColor(danger ? $r('app.color.danger') : $r('app.color.fg'))
       .padding({ left: 11, right: 11, top: 6, bottom: 6 })
-      .backgroundColor($r('app.color.bg'))
+      .backgroundColor($r('app.color.card'))
       .borderRadius(10)
       .border({ width: 0.5, color: $r('app.color.border') })
       .onClick(() => {
@@ -1622,20 +1626,13 @@ struct Index {
 
   /** 设置一级菜单行 */
   @Builder
-  MenuRow(title: string, subtitle: string, page: number) {
+  MenuRow(title: string, page: number) {
     Row() {
-      Column() {
-        Text(title)
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.fg'))
-        Text(subtitle)
-          .fontSize(10)
-          .fontColor($r('app.color.muted'))
-          .margin({ top: 2 })
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
+      Text(title)
+        .fontSize(14)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.fg'))
+        .layoutWeight(1)
 
       Text('›')
         .fontSize(16)
@@ -1654,18 +1651,11 @@ struct Index {
   /** 设置一级菜单 */
   @Builder
   SettingsMenu() {
-    this.MenuRow('华为账号', this.hwOpenId.length > 0 ?
-      (this.hwNickName.length > 0 ? this.hwNickName : '已登录') : '未登录', 2)
-    this.MenuRow('微软 To Do', this.msConnected ?
-      (this.msProfile.length > 0 ? this.msProfile : '已连接') : '未连接', 3)
-    this.MenuRow('通用', '排序 · 外观 · 卡片条数', 1)
-    this.MenuRow('云备份与数据', this.autoBackup ? '自动备份已开启' : '自动备份未开启', 4)
-    this.MenuRow('关于', `v${APP_VERSION}`, 5)
-    Text('点按任意项目进入详细设置。')
-      .fontSize(10)
-      .fontColor($r('app.color.muted'))
-      .width('100%')
-      .margin({ top: 12 })
+    this.MenuRow('华为账号', 2)
+    this.MenuRow('微软 To Do', 3)
+    this.MenuRow('通用', 1)
+    this.MenuRow('云备份与数据', 4)
+    this.MenuRow('关于', 5)
   }
 
   @Builder
@@ -1718,6 +1708,23 @@ struct Index {
               this.SettingsMenu()
             }
             if (this.settingsPage === 1) {
+              Column() {
+            Row() {
+              Text('归类尺子')
+                .fontSize(14)
+                .fontWeight(FontWeight.Medium)
+                .fontColor($r('app.color.fg'))
+                .layoutWeight(1)
+              Text('›')
+                .fontSize(16)
+                .fontColor($r('app.color.muted'))
+            }
+            .width('100%')
+            .onClick(() => {
+              this.showSettings = false;
+              this.showRuler = true;
+            })
+
             this.SectionTitle('任务排序')
             Flex({ wrap: FlexWrap.Wrap }) {
               ForEach(SORT_OPTIONS, (opt: SettingOption) => {
@@ -1757,19 +1764,6 @@ struct Index {
             .width('100%')
             this.HintText('切换后立即生效；「跟随系统」与系统深色模式同步。')
 
-            Row() {
-              Text('顶栏显示今日完成')
-                .fontSize(13)
-                .fontColor($r('app.color.fg'))
-                .layoutWeight(1)
-              Toggle({ type: ToggleType.Switch, isOn: this.settings.showCompletedToday })
-                .selectedColor($r('app.color.accent'))
-                .onChange((isOn: boolean) => {
-                  this.toggleShowDone(isOn);
-                })
-            }
-            .width('100%')
-            .margin({ top: 16 })
 
             this.SectionTitle('大卡片（6*4）显示条数')
             Flex({ wrap: FlexWrap.Wrap }) {
@@ -1791,8 +1785,15 @@ struct Index {
             .width('100%')
             this.HintText('长按桌面空白处 → 卡片 → 象限待办，可选 4*4（方）与 6*4（宽幅，平板 / 2in1）。')
 
-                        }
+                          }
+              .width('100%')
+              .padding(12)
+              .backgroundColor($r('app.color.bg'))
+              .borderRadius(14)
+              .margin({ top: 10 })
+            }
             if (this.settingsPage === 2) {
+              Column() {
 this.SectionTitle('华为账号')
             Row() {
               if (this.hwOpenId.length > 0) {
@@ -1863,8 +1864,15 @@ this.SectionTitle('华为账号')
             }
             this.HintText('需要 AGC「账号服务」与 module.json5 中的 client_id 配置，见 README。')
 
-                        }
+                          }
+              .width('100%')
+              .padding(12)
+              .backgroundColor($r('app.color.bg'))
+              .borderRadius(14)
+              .margin({ top: 10 })
+            }
             if (this.settingsPage === 3) {
+              Column() {
 this.GroupTitle('同步')
             this.SectionTitle('微软 To Do')
             Column({ space: 8 }) {
@@ -1901,7 +1909,7 @@ this.GroupTitle('同步')
               .width('100%')
               .padding(10)
               .borderRadius(12)
-              .backgroundColor($r('app.color.bg'))
+              .backgroundColor($r('app.color.card'))
 
               if (!this.msConnected) {
                 Text('第一步：填写 Azure 应用 Client ID')
@@ -1914,7 +1922,7 @@ this.GroupTitle('同步')
                     .placeholderColor($r('app.color.muted'))
                     .height(38)
                     .layoutWeight(1)
-                    .backgroundColor($r('app.color.bg'))
+                    .backgroundColor($r('app.color.card'))
                     .borderRadius(10)
                     .padding({ left: 10, right: 10 })
                     .onChange((value: string) => {
@@ -1951,8 +1959,15 @@ this.GroupTitle('同步')
             .margin({ top: 8 })
             this.HintText('四个象限对应微软 To Do 的四个同名清单，云端不存在则自动创建；冲突按最后修改时间胜出。需在 Azure 门户「应用注册」建公共客户端，回调填 nativeclient。')
 
-                        }
+                          }
+              .width('100%')
+              .padding(12)
+              .backgroundColor($r('app.color.bg'))
+              .borderRadius(14)
+              .margin({ top: 10 })
+            }
             if (this.settingsPage === 4) {
+              Column() {
 this.GroupTitle('备份与数据')
             this.SectionTitle('云备份')
             Row() {
@@ -2008,8 +2023,15 @@ this.GroupTitle('备份与数据')
             .width('100%')
             .margin({ top: 8 })
 
-                        }
+                          }
+              .width('100%')
+              .padding(12)
+              .backgroundColor($r('app.color.bg'))
+              .borderRadius(14)
+              .margin({ top: 10 })
+            }
             if (this.settingsPage === 5) {
+              Column() {
 this.GroupTitle('关于')
             Column({ space: 6 }) {
               Row() {
@@ -2071,6 +2093,12 @@ this.GroupTitle('关于')
             .width('100%')
             .padding({ top: 8, bottom: 20 })
             .alignItems(HorizontalAlign.Start)
+              }
+              .width('100%')
+              .padding(12)
+              .backgroundColor($r('app.color.bg'))
+              .borderRadius(14)
+              .margin({ top: 10 })
             }
           }
           .width('100%')
@@ -2079,6 +2107,7 @@ this.GroupTitle('关于')
         .width('100%')
         .layoutWeight(1)
         .scrollBar(BarState.Off)
+        .align(Alignment.Top)
       }
       .width('100%')
       .height('86%')
