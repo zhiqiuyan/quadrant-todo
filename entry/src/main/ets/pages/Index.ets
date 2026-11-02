@@ -21,7 +21,7 @@ import { DateUtil } from '../common/DateUtil';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.4.7';
+const APP_VERSION: string = '1.4.8';
 
 interface QuoteItem {
   text: string;
@@ -97,7 +97,7 @@ struct Index {
   @State account: Account = new Account();
   @State settings: AppSettings = new AppSettings();
   @State showSettings: boolean = false;
-  /** 设置二级页面：0=菜单 1=通用 2=华为账号 3=微软 4=备份与数据 5=关于 */
+  /** 设置二级页面：0=菜单 1=通用 2=数据管理 3=关于 */
   @State settingsPage: number = 0;
 
   /** 编辑面板 */
@@ -1613,13 +1613,7 @@ struct Index {
       return '通用';
     }
     if (this.settingsPage === 2) {
-      return '华为账号';
-    }
-    if (this.settingsPage === 3) {
-      return '微软 To Do';
-    }
-    if (this.settingsPage === 4) {
-      return '云备份与数据';
+      return '数据管理';
     }
     return '关于';
   }
@@ -1651,11 +1645,9 @@ struct Index {
   /** 设置一级菜单 */
   @Builder
   SettingsMenu() {
-    this.MenuRow('华为账号', 2)
-    this.MenuRow('微软 To Do', 3)
+    this.MenuRow('数据管理', 2)
     this.MenuRow('通用', 1)
-    this.MenuRow('云备份与数据', 4)
-    this.MenuRow('关于', 5)
+    this.MenuRow('关于', 3)
   }
 
   @Builder
@@ -1706,91 +1698,6 @@ struct Index {
           Column() {
             if (this.settingsPage === 0) {
               this.SettingsMenu()
-            }
-            if (this.settingsPage === 1) {
-              Column() {
-            Row() {
-              Text('归类说明')
-                .fontSize(14)
-                .fontWeight(FontWeight.Medium)
-                .fontColor($r('app.color.fg'))
-                .layoutWeight(1)
-              Text('›')
-                .fontSize(16)
-                .fontColor($r('app.color.muted'))
-            }
-            .width('100%')
-            .onClick(() => {
-              this.showSettings = false;
-              this.showRuler = true;
-            })
-
-            this.SectionTitle('任务排序')
-            Flex({ wrap: FlexWrap.Wrap }) {
-              ForEach(SORT_OPTIONS, (opt: SettingOption) => {
-                Text(opt.label)
-                  .fontSize(11)
-                  .fontColor(this.settings.sortMode === opt.key ?
-                    $r('app.color.on_accent') : $r('app.color.fg'))
-                  .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                  .backgroundColor(this.settings.sortMode === opt.key ?
-                    $r('app.color.accent') : $r('app.color.bg'))
-                  .borderRadius(12)
-                  .margin({ right: 8, top: 8 })
-                  .onClick(() => {
-                    this.changeSortMode(opt.key);
-                  })
-              }, (opt: SettingOption) => `sort-${opt.key}`)
-            }
-            .width('100%')
-
-            this.SectionTitle('外观')
-            Flex({ wrap: FlexWrap.Wrap }) {
-              ForEach(COLOR_MODE_OPTIONS, (opt: SettingOption) => {
-                Text(opt.label)
-                  .fontSize(11)
-                  .fontColor(this.settings.colorMode === opt.key ?
-                    $r('app.color.on_accent') : $r('app.color.fg'))
-                  .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                  .backgroundColor(this.settings.colorMode === opt.key ?
-                    $r('app.color.accent') : $r('app.color.bg'))
-                  .borderRadius(12)
-                  .margin({ right: 8, top: 8 })
-                  .onClick(() => {
-                    this.changeColorMode(opt.key);
-                  })
-              }, (opt: SettingOption) => `mode-${opt.key}`)
-            }
-            .width('100%')
-            this.HintText('切换后立即生效；「跟随系统」与系统深色模式同步。')
-
-
-            this.SectionTitle('大卡片（6*4）显示条数')
-            Flex({ wrap: FlexWrap.Wrap }) {
-              ForEach(WIDGET_LINE_OPTIONS, (opt: SettingOption) => {
-                Text(opt.label)
-                  .fontSize(11)
-                  .fontColor(this.settings.widgetLines === opt.key ?
-                    $r('app.color.on_accent') : $r('app.color.fg'))
-                  .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                  .backgroundColor(this.settings.widgetLines === opt.key ?
-                    $r('app.color.accent') : $r('app.color.bg'))
-                  .borderRadius(12)
-                  .margin({ right: 8, top: 8 })
-                  .onClick(() => {
-                    this.changeWidgetLines(opt.key);
-                  })
-              }, (opt: SettingOption) => `lines-${opt.key}`)
-            }
-            .width('100%')
-            this.HintText('长按桌面空白处 → 卡片 → 象限待办，可选 4*4（方）与 6*4（宽幅，平板 / 2in1）。')
-
-                          }
-              .width('100%')
-              .padding(12)
-              .backgroundColor($r('app.color.bg'))
-              .borderRadius(14)
-              .margin({ top: 10 })
             }
             if (this.settingsPage === 2) {
               Column() {
@@ -1870,8 +1777,6 @@ this.SectionTitle('华为账号')
               .backgroundColor($r('app.color.bg'))
               .borderRadius(14)
               .margin({ top: 10 })
-            }
-            if (this.settingsPage === 3) {
               Column() {
 this.GroupTitle('同步')
             this.SectionTitle('微软 To Do')
@@ -1965,8 +1870,6 @@ this.GroupTitle('同步')
               .backgroundColor($r('app.color.bg'))
               .borderRadius(14)
               .margin({ top: 10 })
-            }
-            if (this.settingsPage === 4) {
               Column() {
 this.GroupTitle('备份与数据')
             this.SectionTitle('云备份')
@@ -2030,7 +1933,92 @@ this.GroupTitle('备份与数据')
               .borderRadius(14)
               .margin({ top: 10 })
             }
-            if (this.settingsPage === 5) {
+            if (this.settingsPage === 1) {
+              Column() {
+            Row() {
+              Text('归类说明')
+                .fontSize(14)
+                .fontWeight(FontWeight.Medium)
+                .fontColor($r('app.color.fg'))
+                .layoutWeight(1)
+              Text('›')
+                .fontSize(16)
+                .fontColor($r('app.color.muted'))
+            }
+            .width('100%')
+            .onClick(() => {
+              this.showSettings = false;
+              this.showRuler = true;
+            })
+
+            this.SectionTitle('任务排序')
+            Flex({ wrap: FlexWrap.Wrap }) {
+              ForEach(SORT_OPTIONS, (opt: SettingOption) => {
+                Text(opt.label)
+                  .fontSize(11)
+                  .fontColor(this.settings.sortMode === opt.key ?
+                    $r('app.color.on_accent') : $r('app.color.fg'))
+                  .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                  .backgroundColor(this.settings.sortMode === opt.key ?
+                    $r('app.color.accent') : $r('app.color.bg'))
+                  .borderRadius(12)
+                  .margin({ right: 8, top: 8 })
+                  .onClick(() => {
+                    this.changeSortMode(opt.key);
+                  })
+              }, (opt: SettingOption) => `sort-${opt.key}`)
+            }
+            .width('100%')
+
+            this.SectionTitle('外观')
+            Flex({ wrap: FlexWrap.Wrap }) {
+              ForEach(COLOR_MODE_OPTIONS, (opt: SettingOption) => {
+                Text(opt.label)
+                  .fontSize(11)
+                  .fontColor(this.settings.colorMode === opt.key ?
+                    $r('app.color.on_accent') : $r('app.color.fg'))
+                  .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                  .backgroundColor(this.settings.colorMode === opt.key ?
+                    $r('app.color.accent') : $r('app.color.bg'))
+                  .borderRadius(12)
+                  .margin({ right: 8, top: 8 })
+                  .onClick(() => {
+                    this.changeColorMode(opt.key);
+                  })
+              }, (opt: SettingOption) => `mode-${opt.key}`)
+            }
+            .width('100%')
+            this.HintText('切换后立即生效；「跟随系统」与系统深色模式同步。')
+
+
+            this.SectionTitle('大卡片（6*4）显示条数')
+            Flex({ wrap: FlexWrap.Wrap }) {
+              ForEach(WIDGET_LINE_OPTIONS, (opt: SettingOption) => {
+                Text(opt.label)
+                  .fontSize(11)
+                  .fontColor(this.settings.widgetLines === opt.key ?
+                    $r('app.color.on_accent') : $r('app.color.fg'))
+                  .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                  .backgroundColor(this.settings.widgetLines === opt.key ?
+                    $r('app.color.accent') : $r('app.color.bg'))
+                  .borderRadius(12)
+                  .margin({ right: 8, top: 8 })
+                  .onClick(() => {
+                    this.changeWidgetLines(opt.key);
+                  })
+              }, (opt: SettingOption) => `lines-${opt.key}`)
+            }
+            .width('100%')
+            this.HintText('长按桌面空白处 → 卡片 → 象限待办，可选 4*4（方）与 6*4（宽幅，平板 / 2in1）。')
+
+                          }
+              .width('100%')
+              .padding(12)
+              .backgroundColor($r('app.color.bg'))
+              .borderRadius(14)
+              .margin({ top: 10 })
+            }
+            if (this.settingsPage === 3) {
               Column() {
             Column({ space: 6 }) {
               Row() {
