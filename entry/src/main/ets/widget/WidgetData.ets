@@ -4,6 +4,7 @@ import { SettingsStore } from '../data/SettingsStore';
 import { TaskRepository } from '../data/TaskRepository';
 import { DateUtil } from '../common/DateUtil';
 import { QUADRANTS, QuadrantMeta, TaskItem } from '../model/TaskItem';
+import { dailyQuote, QuoteItem } from '../model/Quote';
 
 /** 象限内任务行，序列化后随卡片数据下发 */
 export interface WidgetTaskJson {
@@ -31,6 +32,8 @@ export class WidgetPayload {
   q4Json: string = '[]';
   /** 大卡片每格显示的行数（来自设置） */
   linesPerQ: number = 3;
+  /** 每日一言（与主界面一致） */
+  quoteText: string = '';
   updatedText: string = '';
 }
 
@@ -54,6 +57,8 @@ export class WidgetData {
     payload.doneToday = await repo.countCompletedSince(DateUtil.todayStart());
     payload.updatedText = WidgetData.clock(Date.now());
     payload.linesPerQ = SettingsStore.current().widgetLines;
+    const quote: QuoteItem = dailyQuote();
+    payload.quoteText = `${quote.text} —— ${quote.author}`;
 
     const perQ: TaskItem[][] = [[], [], [], []];
     for (let i = 0; i < tasks.length; i++) {
