@@ -1,6 +1,6 @@
-# 四象限待办 · HarmonyOS 版
+# 象限待办 · HarmonyOS 版
 
-参考 [jailedxiu/quadrant-todo](https://github.com/jailedxiu/quadrant-todo)（网页版四象限待办，联动微软 To Do）实现的 **HarmonyOS 原生应用**，使用 ArkTS + ArkUI 声明式范式、Stage 模型开发。
+参考 [jailedxiu/quadrant-todo](https://github.com/jailedxiu/quadrant-todo)（网页版象限待办，联动微软 To Do）实现的 **HarmonyOS 原生应用**，使用 ArkTS + ArkUI 声明式范式、Stage 模型开发。
 
 ## 功能对照
 
@@ -47,7 +47,7 @@
 
 ## 桌面卡片
 
-两种尺寸，均可在「长按桌面空白处 → 卡片 → 四象限待办」添加：
+两种尺寸，均可在「长按桌面空白处 → 卡片 → 象限待办」添加：
 
 | 卡片 | 尺寸 | 内容 | 适用 |
 |---|---|---|---|

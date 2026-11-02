@@ -2,19 +2,19 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "四象限待办主模块"
+      "value": "象限待办主模块"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "四象限待办"
+      "value": "象限待办"
     },
     {
       "name": "EntryAbility_label",
-      "value": "四象限待办"
+      "value": "象限待办"
     },
     {
       "name": "form_label",
-      "value": "四象限待办卡片"
+      "value": "象限待办卡片"
     },
     {
       "name": "form_desc",

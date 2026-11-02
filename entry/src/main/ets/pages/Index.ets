@@ -21,7 +21,7 @@ import { DateUtil } from '../common/DateUtil';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.4.2';
+const APP_VERSION: string = '1.4.3';
 
 /**
  * 输入框独立成组件。
@@ -1702,7 +1702,7 @@ struct Index {
               }, (opt: SettingOption) => `lines-${opt.key}`)
             }
             .width('100%')
-            this.HintText('长按桌面空白处 → 卡片 → 四象限待办，可选 4*4（方）与 6*4（宽幅，平板 / 2in1）。')
+            this.HintText('长按桌面空白处 → 卡片 → 象限待办，可选 4*4（方）与 6*4（宽幅，平板 / 2in1）。')
 
             this.GroupTitle('同步')
             this.SectionTitle('微软 To Do')
@@ -1922,7 +1922,7 @@ struct Index {
                   .fontSize(12)
                   .fontColor($r('app.color.muted'))
                   .layoutWeight(1)
-                Text('四象限待办')
+                Text('象限待办')
                   .fontSize(12)
                   .fontColor($r('app.color.fg'))
               }
