@@ -4,8 +4,8 @@
   "app-distribution-type": "os_integration",
   "uuid": "5027b99e-5f9e-465d-9508-a9e0134ffe18",
   "validity": {
-    "not-before": 1793594365,
-    "not-after": 2108957965
+    "not-before": 1793595701,
+    "not-after": 2108959301
   },
   "type": "release",
   "bundle-info": {

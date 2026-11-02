@@ -21,7 +21,7 @@ import { DateUtil } from '../common/DateUtil';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.4.3';
+const APP_VERSION: string = '1.4.4';
 
 /**
  * 输入框独立成组件。
@@ -73,6 +73,8 @@ struct Index {
   @State account: Account = new Account();
   @State settings: AppSettings = new AppSettings();
   @State showSettings: boolean = false;
+  /** 设置二级页面：0=菜单 1=通用 2=华为账号 3=微软 4=备份与数据 5=关于 */
+  @State settingsPage: number = 0;
 
   /** 编辑面板 */
   @State showEditor: boolean = false;
@@ -934,6 +936,7 @@ struct Index {
       .margin({ left: 5 })
       .onClick(() => {
         this.showSettings = true;
+        this.settingsPage = 0;
       })
     }
     .width('100%')
@@ -1435,6 +1438,7 @@ struct Index {
             .onClick(() => {
               this.showRuler = false;
               this.showSettings = true;
+        this.settingsPage = 0;
             })
         }
         .width('100%')
@@ -1600,6 +1604,70 @@ struct Index {
       .margin({ top: 4 })
   }
 
+  private settingsPageTitle(): string {
+    if (this.settingsPage === 1) {
+      return '通用';
+    }
+    if (this.settingsPage === 2) {
+      return '华为账号';
+    }
+    if (this.settingsPage === 3) {
+      return '微软 To Do';
+    }
+    if (this.settingsPage === 4) {
+      return '云备份与数据';
+    }
+    return '关于';
+  }
+
+  /** 设置一级菜单行 */
+  @Builder
+  MenuRow(title: string, subtitle: string, page: number) {
+    Row() {
+      Column() {
+        Text(title)
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.fg'))
+        Text(subtitle)
+          .fontSize(10)
+          .fontColor($r('app.color.muted'))
+          .margin({ top: 2 })
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      Text('›')
+        .fontSize(16)
+        .fontColor($r('app.color.muted'))
+    }
+    .width('100%')
+    .padding(12)
+    .borderRadius(12)
+    .backgroundColor($r('app.color.bg'))
+    .margin({ top: 8 })
+    .onClick(() => {
+      this.settingsPage = page;
+    })
+  }
+
+  /** 设置一级菜单 */
+  @Builder
+  SettingsMenu() {
+    this.MenuRow('华为账号', this.hwOpenId.length > 0 ?
+      (this.hwNickName.length > 0 ? this.hwNickName : '已登录') : '未登录', 2)
+    this.MenuRow('微软 To Do', this.msConnected ?
+      (this.msProfile.length > 0 ? this.msProfile : '已连接') : '未连接', 3)
+    this.MenuRow('通用', '排序 · 外观 · 卡片条数', 1)
+    this.MenuRow('云备份与数据', this.autoBackup ? '自动备份已开启' : '自动备份未开启', 4)
+    this.MenuRow('关于', `v${APP_VERSION}`, 5)
+    Text('点按任意项目进入详细设置。')
+      .fontSize(10)
+      .fontColor($r('app.color.muted'))
+      .width('100%')
+      .margin({ top: 12 })
+  }
+
   @Builder
   SettingsPanel() {
     Stack({ alignContent: Alignment.Bottom }) {
@@ -1613,10 +1681,26 @@ struct Index {
 
       Column() {
         Row() {
-          Text('设置')
-            .fontSize(16)
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.fg'))
+          if (this.settingsPage === 0) {
+            Text('设置')
+              .fontSize(16)
+              .fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.fg'))
+          } else {
+            Text('‹')
+              .fontSize(20)
+              .fontWeight(FontWeight.Medium)
+              .fontColor($r('app.color.fg'))
+              .width(30)
+              .onClick(() => {
+                this.settingsPage = 0;
+              })
+            Text(this.settingsPageTitle())
+              .fontSize(16)
+              .fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.fg'))
+              .margin({ left: 2 })
+          }
           Blank()
           Text('✕')
             .fontSize(16)
@@ -1630,7 +1714,10 @@ struct Index {
 
         Scroll() {
           Column() {
-            this.GroupTitle('通用')
+            if (this.settingsPage === 0) {
+              this.SettingsMenu()
+            }
+            if (this.settingsPage === 1) {
             this.SectionTitle('任务排序')
             Flex({ wrap: FlexWrap.Wrap }) {
               ForEach(SORT_OPTIONS, (opt: SettingOption) => {
@@ -1704,7 +1791,81 @@ struct Index {
             .width('100%')
             this.HintText('长按桌面空白处 → 卡片 → 象限待办，可选 4*4（方）与 6*4（宽幅，平板 / 2in1）。')
 
-            this.GroupTitle('同步')
+                        }
+            if (this.settingsPage === 2) {
+this.SectionTitle('华为账号')
+            Row() {
+              if (this.hwOpenId.length > 0) {
+                if (this.hwAvatar.length > 0) {
+                  Image(this.hwAvatar)
+                    .width(34)
+                    .height(34)
+                    .borderRadius(17)
+                    .objectFit(ImageFit.Cover)
+                } else {
+                  Text(this.hwNickName.length > 0 ? this.hwNickName.substring(0, 1) : '华')
+                    .fontSize(14)
+                    .fontColor('#FFFFFF')
+                    .width(34)
+                    .height(34)
+                    .textAlign(TextAlign.Center)
+                    .borderRadius(17)
+                    .backgroundColor($r('app.color.accent'))
+                }
+                Column() {
+                  Text(this.hwNickName.length > 0 ? this.hwNickName : '已登录')
+                    .fontSize(13)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor($r('app.color.fg'))
+                  Text('华为账号已连接')
+                    .fontSize(10)
+                    .fontColor($r('app.color.muted'))
+                    .margin({ top: 2 })
+                }
+                .alignItems(HorizontalAlign.Start)
+                .layoutWeight(1)
+                .margin({ left: 9 })
+
+                this.Chip('退出', () => {
+                  this.hwLogout();
+                }, true)
+              } else {
+                Column() {
+                  Text('未登录')
+                    .fontSize(13)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor($r('app.color.fg'))
+                  Text('登录后可使用云备份与云同步')
+                    .fontSize(10)
+                    .fontColor($r('app.color.muted'))
+                    .margin({ top: 2 })
+                }
+                .alignItems(HorizontalAlign.Start)
+                .layoutWeight(1)
+
+                this.Chip(this.hwBusy ? '登录中…' : '登录', () => {
+                  this.hwLogin();
+                }, false)
+              }
+            }
+            .width('100%')
+            .padding(10)
+            .borderRadius(12)
+            .backgroundColor($r('app.color.card'))
+            .margin({ top: 8 })
+
+            if (this.hwError.length > 0) {
+              Text(this.hwError)
+                .fontSize(10)
+                .fontColor($r('app.color.danger'))
+                .width('100%')
+                .margin({ top: 6 })
+            }
+            this.HintText('需要 AGC「账号服务」与 module.json5 中的 client_id 配置，见 README。')
+
+                        }
+            if (this.settingsPage === 3) {
+this.GroupTitle('同步')
             this.SectionTitle('微软 To Do')
             Column({ space: 8 }) {
               Row() {
@@ -1790,77 +1951,9 @@ struct Index {
             .margin({ top: 8 })
             this.HintText('四个象限对应微软 To Do 的四个同名清单，云端不存在则自动创建；冲突按最后修改时间胜出。需在 Azure 门户「应用注册」建公共客户端，回调填 nativeclient。')
 
-            this.SectionTitle('华为账号')
-            Row() {
-              if (this.hwOpenId.length > 0) {
-                if (this.hwAvatar.length > 0) {
-                  Image(this.hwAvatar)
-                    .width(34)
-                    .height(34)
-                    .borderRadius(17)
-                    .objectFit(ImageFit.Cover)
-                } else {
-                  Text(this.hwNickName.length > 0 ? this.hwNickName.substring(0, 1) : '华')
-                    .fontSize(14)
-                    .fontColor('#FFFFFF')
-                    .width(34)
-                    .height(34)
-                    .textAlign(TextAlign.Center)
-                    .borderRadius(17)
-                    .backgroundColor($r('app.color.accent'))
-                }
-                Column() {
-                  Text(this.hwNickName.length > 0 ? this.hwNickName : '已登录')
-                    .fontSize(13)
-                    .fontWeight(FontWeight.Medium)
-                    .fontColor($r('app.color.fg'))
-                  Text('华为账号已连接')
-                    .fontSize(10)
-                    .fontColor($r('app.color.muted'))
-                    .margin({ top: 2 })
-                }
-                .alignItems(HorizontalAlign.Start)
-                .layoutWeight(1)
-                .margin({ left: 9 })
-
-                this.Chip('退出', () => {
-                  this.hwLogout();
-                }, true)
-              } else {
-                Column() {
-                  Text('未登录')
-                    .fontSize(13)
-                    .fontWeight(FontWeight.Medium)
-                    .fontColor($r('app.color.fg'))
-                  Text('登录后可使用云备份与云同步')
-                    .fontSize(10)
-                    .fontColor($r('app.color.muted'))
-                    .margin({ top: 2 })
-                }
-                .alignItems(HorizontalAlign.Start)
-                .layoutWeight(1)
-
-                this.Chip(this.hwBusy ? '登录中…' : '登录', () => {
-                  this.hwLogin();
-                }, false)
-              }
-            }
-            .width('100%')
-            .padding(10)
-            .borderRadius(12)
-            .backgroundColor($r('app.color.card'))
-            .margin({ top: 8 })
-
-            if (this.hwError.length > 0) {
-              Text(this.hwError)
-                .fontSize(10)
-                .fontColor($r('app.color.danger'))
-                .width('100%')
-                .margin({ top: 6 })
-            }
-            this.HintText('需要 AGC「账号服务」与 module.json5 中的 client_id 配置，见 README。')
-
-            this.GroupTitle('备份与数据')
+                        }
+            if (this.settingsPage === 4) {
+this.GroupTitle('备份与数据')
             this.SectionTitle('云备份')
             Row() {
               Text('自动备份（改动后自动上传）')
@@ -1915,7 +2008,9 @@ struct Index {
             .width('100%')
             .margin({ top: 8 })
 
-            this.GroupTitle('关于')
+                        }
+            if (this.settingsPage === 5) {
+this.GroupTitle('关于')
             Column({ space: 6 }) {
               Row() {
                 Text('应用')
@@ -1976,6 +2071,7 @@ struct Index {
             .width('100%')
             .padding({ top: 8, bottom: 20 })
             .alignItems(HorizontalAlign.Start)
+            }
           }
           .width('100%')
           .alignItems(HorizontalAlign.Start)
