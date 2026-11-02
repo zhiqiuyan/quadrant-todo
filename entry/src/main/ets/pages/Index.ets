@@ -21,7 +21,45 @@ import { DateUtil } from '../common/DateUtil';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.3.0';
+const APP_VERSION: string = '1.4.0';
+
+/**
+ * 输入框独立成组件。
+ * 之前输入框直接写在页面里，每敲一个字都会把整页（四个格子 + 全部任务卡）重绘一次，
+ * 中文输入法组词时尤其卡。抽成子组件后，打字只重绘这个输入框自己。
+ */
+@Component
+struct QuickInput {
+  @Link text: string;
+  @Prop placeholder: string = '';
+  @Prop boxHeight: number = 32;
+  @Prop fontSize: number = 12;
+  @Prop boxBg: ResourceColor = Color.Transparent;
+  @Prop topMargin: number = 0;
+  onCommit: () => void = () => {
+  };
+
+  build() {
+    TextInput({ placeholder: this.placeholder, text: this.text })
+      .placeholderColor($r('app.color.muted'))
+      .placeholderFont({ size: this.fontSize })
+      .fontSize(this.fontSize)
+      .fontColor($r('app.color.fg'))
+      .height(this.boxHeight)
+      .width('100%')
+      .borderRadius(10)
+      .padding({ left: 8, right: 8 })
+      .margin({ top: this.topMargin })
+      .backgroundColor(this.boxBg)
+      .onChange((value: string) => {
+        this.text = value;
+      })
+      .onSubmit(() => {
+        this.onCommit();
+      })
+  }
+}
+
 
 @Entry
 @Component
@@ -81,6 +119,7 @@ struct Index {
   @State hwAvatar: string = '';
   @State hwOpenId: string = '';
   @State hwBusy: boolean = false;
+  @State hwError: string = '';
   @State autoBackup: boolean = true;
   @State lastBackupText: string = '';
   @State backupBusy: boolean = false;
@@ -162,12 +201,37 @@ struct Index {
     }
   }
 
-  /** 任何写操作之后：刷新界面 + 推送桌面卡片 + 按需云同步 + 自动云备份 */
+  /**
+   * 任何写操作之后：只等本地库刷新（毫秒级）。
+   * 卡片推送、微软同步、云备份全部延后到后台执行，
+   * 否则「保存」要等好几秒（网络往返 + 卡片 IPC + 云端上传）才会有反应。
+   */
   private async afterChange(): Promise<void> {
     await this.reload();
-    await WidgetBridge.refreshAll(this.ctx);
+    this.scheduleSideWork();
+  }
+
+  private sideTimer: number = -1;
+
+  /** 连续改动作业时只跑最后一次，避免每次都推卡片/备份 */
+  private scheduleSideWork(): void {
+    if (this.sideTimer !== -1) {
+      clearTimeout(this.sideTimer);
+    }
+    this.sideTimer = setTimeout(() => {
+      this.sideTimer = -1;
+      this.runSideWork();
+    }, 400);
+  }
+
+  private async runSideWork(): Promise<void> {
+    try {
+      await WidgetBridge.refreshAll(this.ctx);
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'widget refresh failed: %{public}s', (err as Error).message);
+    }
     if (this.msConnected && MsAuthService.autoSync()) {
-      await this.msBackgroundSync();
+      this.msBackgroundSync();
     }
     if (this.autoBackup && this.ctx !== undefined) {
       BackupService.autoBackup(this.ctx);
@@ -252,8 +316,17 @@ struct Index {
     return $r('app.color.q4_bg');
   }
 
-  private subtitle(): string {
-    const parts: string[] = [this.account.name];
+  private quadrantName(quadrant: number): string {
+    for (let i = 0; i < QUADRANTS.length; i++) {
+      if (QUADRANTS[i].key === quadrant) {
+        return QUADRANTS[i].name;
+      }
+    }
+    return '';
+  }
+
+  private statsLine(): string {
+    const parts: string[] = [];
     if (this.tasks.length === 0) {
       parts.push('把事放进格子里，脑子就空出来了');
     } else {
@@ -397,12 +470,6 @@ struct Index {
     await WidgetBridge.refreshAll(this.ctx);
   }
 
-  private changeQuadrantSettings(key: number): void {
-    const next: AppSettings = this.settings.copy();
-    next.defaultQuadrant = key;
-    this.saveSettings(next, false);
-  }
-
   private changeSortMode(key: number): void {
     const next: AppSettings = this.settings.copy();
     next.sortMode = key;
@@ -515,14 +582,19 @@ struct Index {
       this.toast('标题不能为空');
       return;
     }
+    const id: number = this.editingId;
+    const quadrant: number = this.draftQuadrant;
+    const due: number = this.draftDue;
+    const important: boolean = this.draftImportant;
+    // 先收面板，手感上「点了就存」，写库在后面几毫秒完成
+    this.showEditor = false;
     const repo: TaskRepository = TaskRepository.getInstance();
     try {
-      if (this.editingId > 0) {
-        await repo.updateFields(this.editingId, title, this.draftQuadrant, this.draftDue, this.draftImportant);
+      if (id > 0) {
+        await repo.updateFields(id, title, quadrant, due, important);
       } else {
-        await repo.insert(title, this.draftQuadrant, this.draftDue, this.draftImportant);
+        await repo.insert(title, quadrant, due, important);
       }
-      this.showEditor = false;
       await this.afterChange();
     } catch (err) {
       this.toast('保存失败：' + (err as Error).message);
@@ -634,25 +706,55 @@ struct Index {
     if (this.hwBusy) {
       return;
     }
+    if (this.ctx === undefined) {
+      this.hwError = '界面上下文未就绪，请稍后再试';
+      return;
+    }
     this.hwBusy = true;
+    this.hwError = '';
     try {
-      const profile: HuaweiIdProfile = await HuaweiAuthService.login();
+      const profile: HuaweiIdProfile = await HuaweiAuthService.login(this.ctx);
       this.refreshHuaweiState();
-      this.toast(profile.nickName.length > 0 ?
-        `已登录：${profile.nickName}` : '华为账号已登录');
       this.refreshBackupState();
+      this.toast(profile.nickName.length > 0 ? `已登录：${profile.nickName}` : '华为账号已登录');
     } catch (err) {
-      this.toast((err as Error).message);
+      this.hwError = (err as Error).message;
+      await this.showHwErrorDialog();
     } finally {
       this.hwBusy = false;
     }
   }
 
+  /** 登录失败要能看懂原因：错误码 + 缺哪一步配置，而不是一闪而过的提示 */
+  private async showHwErrorDialog(): Promise<void> {
+    let extra: string = '';
+    const configured: boolean = await HuaweiAuthService.clientIdConfigured();
+    if (!configured) {
+      extra = '\n\n另：module.json5 里的 client_id 还是空的。需要在 AppGallery Connect 创建应用、开通「账号服务」，' +
+        '把 Client ID 填进 client_id 后重新打包安装。';
+    }
+    const code: number = HuaweiAuthService.lastCode;
+    const codeText: string = code === 0 ? '' : `（错误码 ${code}）`;
+    this.getUIContext().showAlertDialog({
+      title: '华为账号登录失败',
+      message: `${this.hwError}${codeText}${extra}`,
+      autoCancel: true,
+      confirm: {
+        value: '知道了',
+        action: () => {
+        }
+      }
+    });
+  }
+
   private async hwLogout(): Promise<void> {
     try {
-      await HuaweiAuthService.logout();
+      if (this.ctx !== undefined) {
+        await HuaweiAuthService.logout(this.ctx);
+      }
       this.refreshHuaweiState();
       this.refreshBackupState();
+      this.hwError = '';
       this.toast('已退出华为账号');
     } catch (err) {
       this.toast((err as Error).message);
@@ -703,6 +805,37 @@ struct Index {
     }
   }
 
+  /** 导出到本地文件：不依赖华为账号 */
+  private async doExportFile(): Promise<void> {
+    if (this.backupBusy || this.ctx === undefined) {
+      return;
+    }
+    this.backupBusy = true;
+    try {
+      const result: BackupResult = await BackupService.exportToFile(this.ctx);
+      this.toast(result.message);
+    } finally {
+      this.backupBusy = false;
+    }
+  }
+
+  /** 从本地文件恢复 */
+  private async doImportFile(): Promise<void> {
+    if (this.backupBusy || this.ctx === undefined) {
+      return;
+    }
+    this.backupBusy = true;
+    try {
+      const result: BackupResult = await BackupService.importFromFile(this.ctx);
+      if (result.ok) {
+        await this.afterChange();
+      }
+      this.toast(result.message);
+    } finally {
+      this.backupBusy = false;
+    }
+  }
+
   private async toggleAutoBackup(on: boolean): Promise<void> {
     this.autoBackup = on;
     try {
@@ -725,10 +858,18 @@ struct Index {
   }
 
   /** 后台静默同步：只在失败时提示，不抢焦点 */
+  private msSyncGuard: number = 0;
+
   private async msBackgroundSync(): Promise<void> {
     if (this.msBusy || !MsAuthService.connected()) {
       return;
     }
+    const now: number = Date.now();
+    // 15s 内不重复触发：连续编辑时不要每次都打一轮网络同步
+    if (now - this.msSyncGuard < 15000) {
+      return;
+    }
+    this.msSyncGuard = now;
     this.msBusy = true;
     try {
       const result: MsSyncResult = await MsSyncService.sync();
@@ -843,6 +984,26 @@ struct Index {
       .backgroundColor(avatarColor(acc.colorIndex))
   }
 
+  /** 纯平面的「设置」图标：三条带滑块的横线（不用彩色 emoji 字形，避免 3D 拟真感） */
+  @Builder
+  SliderBar(lineWidth: number, knobX: number) {
+    Stack({ alignContent: Alignment.Start }) {
+      Row()
+        .width(lineWidth)
+        .height(1.5)
+        .borderRadius(1)
+        .backgroundColor($r('app.color.fg'))
+      Row()
+        .width(4.6)
+        .height(4.6)
+        .borderRadius(2.3)
+        .backgroundColor($r('app.color.fg'))
+        .offset({ x: knobX })
+    }
+    .width(lineWidth)
+    .height(5)
+  }
+
   @Builder
   Header() {
     Row() {
@@ -854,11 +1015,13 @@ struct Index {
       })
 
       Column() {
-        Text('四象限待办')
-          .fontSize(19)
-          .fontWeight(FontWeight.Bold)
+        Text(this.account.name)
+          .fontSize(15)
+          .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.fg'))
-        Text(this.subtitle())
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(this.statsLine())
           .fontSize(10)
           .fontColor($r('app.color.muted'))
           .maxLines(1)
@@ -890,18 +1053,21 @@ struct Index {
           this.openDone();
         })
 
-      Text('⚙')
-        .fontSize(15)
-        .fontColor($r('app.color.fg'))
-        .width(30)
-        .height(28)
-        .textAlign(TextAlign.Center)
-        .backgroundColor($r('app.color.card'))
-        .borderRadius(13)
-        .margin({ left: 5 })
-        .onClick(() => {
-          this.showSettings = true;
-        })
+      Column({ space: 2.5 }) {
+        this.SliderBar(15, 2)
+        this.SliderBar(15, 8)
+        this.SliderBar(15, 4.5)
+      }
+      .justifyContent(FlexAlign.Center)
+      .alignItems(HorizontalAlign.Center)
+      .width(30)
+      .height(28)
+      .backgroundColor($r('app.color.card'))
+      .borderRadius(13)
+      .margin({ left: 5 })
+      .onClick(() => {
+        this.showSettings = true;
+      })
     }
     .width('100%')
     .padding({ left: 14, right: 14, top: 12, bottom: 8 })
@@ -926,7 +1092,7 @@ struct Index {
     }
     .width('100%')
     .layoutWeight(1)
-    .padding({ left: 12, right: 12 })
+    .padding({ left: 12, right: 12, bottom: 10 })
   }
 
   @Builder
@@ -971,22 +1137,46 @@ struct Index {
       }
 
       Row() {
-        TextInput({ placeholder: '添加任务…', text: this.inputOf(meta.key) })
-          .placeholderColor($r('app.color.muted'))
-          .placeholderFont({ size: 12 })
-          .fontSize(12)
-          .fontColor($r('app.color.fg'))
-          .height(32)
-          .layoutWeight(1)
-          .backgroundColor($r('app.color.card'))
-          .borderRadius(8)
-          .padding({ left: 8, right: 8 })
-          .onChange((value: string) => {
-            this.setInput(meta.key, value);
-          })
-          .onSubmit(() => {
-            this.addTask(meta.key, this.inputOf(meta.key));
-          })
+        Row() {
+          if (meta.key === 1) {
+            QuickInput({
+              text: $inputQ1,
+              placeholder: '添加任务…',
+              boxBg: $r('app.color.card'),
+              onCommit: () => {
+                this.addTask(1, this.inputQ1);
+              }
+            })
+          } else if (meta.key === 2) {
+            QuickInput({
+              text: $inputQ2,
+              placeholder: '添加任务…',
+              boxBg: $r('app.color.card'),
+              onCommit: () => {
+                this.addTask(2, this.inputQ2);
+              }
+            })
+          } else if (meta.key === 3) {
+            QuickInput({
+              text: $inputQ3,
+              placeholder: '添加任务…',
+              boxBg: $r('app.color.card'),
+              onCommit: () => {
+                this.addTask(3, this.inputQ3);
+              }
+            })
+          } else {
+            QuickInput({
+              text: $inputQ4,
+              placeholder: '添加任务…',
+              boxBg: $r('app.color.card'),
+              onCommit: () => {
+                this.addTask(4, this.inputQ4);
+              }
+            })
+          }
+        }
+        .layoutWeight(1)
 
         Button() {
           Text('＋')
@@ -1087,31 +1277,6 @@ struct Index {
   }
 
   @Builder
-  BottomBar() {
-    Row() {
-      Button() {
-        Row({ space: 6 }) {
-          Text('＋')
-            .fontSize(17)
-            .fontColor($r('app.color.on_accent'))
-          Text('新建任务')
-            .fontSize(14)
-            .fontColor($r('app.color.on_accent'))
-        }
-      }
-      .width('100%')
-      .height(44)
-      .borderRadius(22)
-      .backgroundColor($r('app.color.accent'))
-      .onClick(() => {
-        this.openEditor();
-      })
-    }
-    .width('100%')
-    .padding({ left: 12, right: 12, top: 2, bottom: 10 })
-  }
-
-  @Builder
   DueChip(label: string, offsetDays: number) {
     Text(label)
       .fontSize(12)
@@ -1157,40 +1322,47 @@ struct Index {
         }
         .width('100%')
 
-        TextInput({ placeholder: '要做什么？', text: this.draftTitle })
-          .fontSize(15)
-          .fontColor($r('app.color.fg'))
-          .placeholderColor($r('app.color.muted'))
-          .height(44)
-          .backgroundColor($r('app.color.bg'))
-          .borderRadius(10)
-          .padding({ left: 10, right: 10 })
-          .margin({ top: 12 })
-          .onChange((value: string) => {
-            this.draftTitle = value;
-          })
+        QuickInput({
+          text: $draftTitle,
+          placeholder: '要做什么？',
+          boxHeight: 44,
+          fontSize: 15,
+          boxBg: $r('app.color.bg'),
+          topMargin: 12,
+          onCommit: () => {
+            this.saveDraft();
+          }
+        })
 
-        Text('放在哪个象限')
-          .fontSize(12)
-          .fontColor($r('app.color.muted'))
+        if (this.editingId > 0) {
+          Text('移动到其它象限')
+            .fontSize(12)
+            .fontColor($r('app.color.muted'))
+            .width('100%')
+            .margin({ top: 16 })
+
+          Flex({ wrap: FlexWrap.Wrap }) {
+            ForEach(QUADRANTS, (meta: QuadrantMeta) => {
+              Text(meta.name)
+                .fontSize(12)
+                .fontColor(this.draftQuadrant === meta.key ? $r('app.color.on_accent') : $r('app.color.fg'))
+                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                .backgroundColor(this.draftQuadrant === meta.key ? $r('app.color.accent') : this.quadBg(meta.key))
+                .borderRadius(12)
+                .margin({ right: 8, top: 8 })
+                .onClick(() => {
+                  this.draftQuadrant = meta.key;
+                })
+            }, (meta: QuadrantMeta) => `pick-${meta.key}`)
+          }
           .width('100%')
-          .margin({ top: 16 })
-
-        Flex({ wrap: FlexWrap.Wrap }) {
-          ForEach(QUADRANTS, (meta: QuadrantMeta) => {
-            Text(meta.name)
-              .fontSize(12)
-              .fontColor(this.draftQuadrant === meta.key ? $r('app.color.on_accent') : $r('app.color.fg'))
-              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-              .backgroundColor(this.draftQuadrant === meta.key ? $r('app.color.accent') : this.quadBg(meta.key))
-              .borderRadius(12)
-              .margin({ right: 8, top: 8 })
-              .onClick(() => {
-                this.draftQuadrant = meta.key;
-              })
-          }, (meta: QuadrantMeta) => `pick-${meta.key}`)
+        } else {
+          Text(`将放入「${this.quadrantName(this.draftQuadrant)}」`)
+            .fontSize(12)
+            .fontColor($r('app.color.muted'))
+            .width('100%')
+            .margin({ top: 14 })
         }
-        .width('100%')
 
         Row() {
           Text('截止日期')
@@ -1787,25 +1959,6 @@ struct Index {
             .backgroundColor($r('app.color.bg'))
             .margin({ top: 8 })
 
-            this.SectionTitle('新建任务的默认象限')
-            Flex({ wrap: FlexWrap.Wrap }) {
-              ForEach(QUADRANTS, (meta: QuadrantMeta) => {
-                Text(meta.name)
-                  .fontSize(12)
-                  .fontColor(this.settings.defaultQuadrant === meta.key ?
-                    $r('app.color.on_accent') : $r('app.color.fg'))
-                  .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-                  .backgroundColor(this.settings.defaultQuadrant === meta.key ?
-                    $r('app.color.accent') : this.quadBg(meta.key))
-                  .borderRadius(12)
-                  .margin({ right: 8, top: 8 })
-                  .onClick(() => {
-                    this.changeQuadrantSettings(meta.key);
-                  })
-              }, (meta: QuadrantMeta) => `def-${meta.key}`)
-            }
-            .width('100%')
-
             this.SectionTitle('任务排序')
             Flex({ wrap: FlexWrap.Wrap }) {
               ForEach(SORT_OPTIONS, (opt: SettingOption) => {
@@ -2040,17 +2193,13 @@ struct Index {
                 .layoutWeight(1)
 
                 Button() {
-                  Row({ space: 5 }) {
-                    Text('⌘')
-                      .fontSize(12)
-                      .fontColor($r('app.color.on_accent'))
-                    Text(this.hwBusy ? '登录中…' : '登录')
-                      .fontSize(12)
-                      .fontColor($r('app.color.on_accent'))
-                  }
+                  Text(this.hwBusy ? '登录中…' : '登录')
+                    .fontSize(12)
+                    .fontColor($r('app.color.on_accent'))
                 }
                 .height(32)
                 .borderRadius(16)
+                .padding({ left: 14, right: 14 })
                 .backgroundColor($r('app.color.accent'))
                 .onClick(() => {
                   this.hwLogin();
@@ -2062,6 +2211,14 @@ struct Index {
             .borderRadius(12)
             .backgroundColor($r('app.color.card'))
             .margin({ top: 8 })
+
+            if (this.hwError.length > 0) {
+              Text(this.hwError)
+                .fontSize(10)
+                .fontColor($r('app.color.danger'))
+                .width('100%')
+                .margin({ top: 6 })
+            }
             this.HintText('需要 AGC「账号服务」与 module.json5 中的 client_id 配置，见 README。')
 
             this.SectionTitle('云备份')
@@ -2079,7 +2236,7 @@ struct Index {
             .width('100%')
 
             Row({ space: 8 }) {
-              Text(this.backupBusy ? '处理中…' : '立即备份')
+              Text(this.backupBusy ? '处理中…' : '备份到云端')
                 .fontSize(11)
                 .fontColor($r('app.color.on_accent'))
                 .padding({ left: 12, right: 12, top: 6, bottom: 6 })
@@ -2105,7 +2262,30 @@ struct Index {
             }
             .width('100%')
             .margin({ top: 8 })
-            this.HintText('备份含全部账号的任务，上传到 AGC 云存储并以华为账号隔离；恢复时任务并入当前账号（同象限同标题去重）。')
+
+            Row({ space: 8 }) {
+              Text('导出到文件')
+                .fontSize(11)
+                .fontColor($r('app.color.fg'))
+                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                .backgroundColor($r('app.color.bg'))
+                .borderRadius(10)
+                .onClick(() => {
+                  this.doExportFile();
+                })
+              Text('从文件恢复')
+                .fontSize(11)
+                .fontColor($r('app.color.fg'))
+                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                .backgroundColor($r('app.color.bg'))
+                .borderRadius(10)
+                .onClick(() => {
+                  this.doImportFile();
+                })
+            }
+            .width('100%')
+            .margin({ top: 8 })
+            this.HintText('导出/导入走系统文件选择器，不需要华为账号；云端备份需要登录华为账号并在 AGC 开通云存储。')
 
             this.SectionTitle('数据')
             Row({ space: 10 }) {
@@ -2243,7 +2423,6 @@ struct Index {
 
         if (this.ready) {
           this.Board()
-          this.BottomBar()
         } else {
           Column() {
             LoadingProgress()

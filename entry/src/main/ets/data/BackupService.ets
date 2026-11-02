@@ -1,6 +1,6 @@
 import { cloudStorage } from '@kit.CloudFoundationKit';
 import { common } from '@kit.AbilityKit';
-import { fileIo as fs } from '@kit.CoreFileKit';
+import { fileIo as fs, picker } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -89,6 +89,7 @@ export class BackupService {
     };
 
     let total: number = 0;
+    const keepId: number = repo.currentAccountId();
     for (let i = 0; i < accounts.length; i++) {
       const account = accounts[i];
       repo.useAccount(account.id);
@@ -115,6 +116,8 @@ export class BackupService {
         tasks: rows
       });
     }
+    // 遍历过程中切换过数据维度，必须切回当前账号，否则界面会读到别的账号
+    repo.useAccount(keepId);
     snapshot.taskCount = total;
     return JSON.stringify(snapshot);
   }
@@ -197,6 +200,60 @@ export class BackupService {
       result.message = `恢复失败：${(err as Error).message}`;
     }
     return result;
+  }
+
+  /** 导出到本地文件：不依赖华为账号，云备份不可用时兜底 */
+  static async exportToFile(context: common.UIAbilityContext): Promise<BackupResult> {
+    const result: BackupResult = new BackupResult();
+    try {
+      const json: string = await BackupService.snapshotJson();
+      const docPicker: picker.DocumentViewPicker = new picker.DocumentViewPicker(context);
+      const uris: Array<string> = await docPicker.save({
+        newFileNames: [`quadrant-todo-${BackupService.stamp()}.json`]
+      });
+      if (uris.length === 0) {
+        result.message = '已取消导出';
+        return result;
+      }
+      const file = fs.openSync(uris[0], fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+      fs.writeSync(file.fd, json);
+      fs.closeSync(file.fd);
+      result.ok = true;
+      result.taskCount = BackupService.countOf(json);
+      result.message = `已导出 ${result.taskCount} 条任务`;
+    } catch (err) {
+      result.message = `导出失败：${(err as Error).message}`;
+    }
+    return result;
+  }
+
+  /** 从本地文件恢复：选一个 json 备份，并入当前账号 */
+  static async importFromFile(context: common.UIAbilityContext): Promise<BackupResult> {
+    const result: BackupResult = new BackupResult();
+    try {
+      const docPicker: picker.DocumentViewPicker = new picker.DocumentViewPicker(context);
+      const uris: Array<string> = await docPicker.select({ maxSelectNumber: 1 });
+      if (uris.length === 0) {
+        result.message = '已取消选择';
+        return result;
+      }
+      const json: string = await BackupService.readLocal(uris[0]);
+      result.taskCount = await BackupService.importJson(json);
+      result.ok = true;
+      result.message = `已导入 ${result.taskCount} 条任务到「${AccountStore.active().name}」`;
+    } catch (err) {
+      result.message = `导入失败：${(err as Error).message}`;
+    }
+    return result;
+  }
+
+  private static stamp(): string {
+    const d: Date = new Date();
+    const mm: string = d.getMonth() + 1 < 10 ? `0${d.getMonth() + 1}` : `${d.getMonth() + 1}`;
+    const dd: string = d.getDate() < 10 ? `0${d.getDate()}` : `${d.getDate()}`;
+    const hh: string = d.getHours() < 10 ? `0${d.getHours()}` : `${d.getHours()}`;
+    const mi: string = d.getMinutes() < 10 ? `0${d.getMinutes()}` : `${d.getMinutes()}`;
+    return `${d.getFullYear()}${mm}${dd}-${hh}${mi}`;
   }
 
   /** 自动备份：改动后调用（内部 60s 防抖），失败静默不打扰 */
