@@ -21,7 +21,7 @@ import { DateUtil } from '../common/DateUtil';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.4.6';
+const APP_VERSION: string = '1.4.7';
 
 interface QuoteItem {
   text: string;
@@ -110,7 +110,7 @@ struct Index {
   @State draftDate: Date = new Date();
   @State showCalendar: boolean = false;
 
-  /** 归类尺子面板 */
+  /** 归类说明面板 */
   @State showRuler: boolean = false;
 
   /** 已完成面板 */
@@ -1360,7 +1360,7 @@ struct Index {
 
       Column() {
         Row() {
-          Text('归类尺子')
+          Text('归类说明')
             .fontSize(16)
             .fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.fg'))
@@ -1710,7 +1710,7 @@ struct Index {
             if (this.settingsPage === 1) {
               Column() {
             Row() {
-              Text('归类尺子')
+              Text('归类说明')
                 .fontSize(14)
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('app.color.fg'))

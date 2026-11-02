@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "com.quadrant.todo",
     "vendor": "quadrant",
-    "versionCode": 1040600,
-    "versionName": "1.4.6",
+    "versionCode": 1040700,
+    "versionName": "1.4.7",
     "icon": "$media:app_icon",
     "label": "$string:app_name"
   }
