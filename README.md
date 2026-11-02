@@ -95,11 +95,13 @@
 | 错误码 | 含义 | 处理 |
 | --- | --- | --- |
 | 401 | 参数校验失败：授权页面拿不到界面上下文 | 1.4.0 已修（`AuthenticationController` 必须传 `UIAbilityContext`） |
+| 1001502003 | `Invalid clientId or profile` | 安装包签名不是 AGC 签发的 Profile（本地测试证书过不了校验），或 `client_id` 未配置 |
 | 1001500001 | 应用信息校验失败 | AGC 应用包名 / `client_id` / 签名证书指纹三者不一致 |
 | 1001500003 | 设备未登录华为账号 | 先在系统「设置 → 华为账号」登录 |
 | 1001502014 | 用户取消授权 | 重新点登录即可 |
 
-> 1.4.0 修复：此前 `AuthenticationController` 未传 context，只要需要拉起授权页面就必返回 401，表现为「登录时发生异常、登不上去」。现已改为传入 `UIAbilityContext`。
+> **关键结论（1.4.1 实测 1001502003）**：命令行用 OpenHarmony 测试证书签的包，签名指纹不在 AGC 登记表里，Account Kit 一律拒绝。
+> 能登录的唯一路径：DevEco Studio 登录华为账号 → File → Project Structure → Signing Configs 勾选 **Automatically generate signature** → 用 DevEco 直接 Run 安装；同时 AGC 创建应用（包名 `com.quadrant.todo`）、开通「账号服务」，把 AGC 的 Client ID 填进 `module.json5` 的 `metadata.client_id`。
 
 **不依赖账号的备份**：设置 → 云备份 → 「导出到文件 / 从文件恢复」，走系统文件选择器把 JSON 备份存到本地或网盘，未登录也能用。
 

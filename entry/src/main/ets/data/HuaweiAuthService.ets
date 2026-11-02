@@ -55,6 +55,10 @@ export class HuaweiAuthService {
     if (code === 1001502002) {
       return '网络异常，请检查网络后重试';
     }
+    if (code === 1001502003) {
+      return '应用签名或 client_id 校验失败：当前安装包用的是本地测试证书（非 AGC 签发的 Profile），' +
+        '且 module.json5 的 client_id 为空。需要用 DevEco 自动签名打包安装';
+    }
     const extra: string = raw.length > 0 ? `：${raw}` : '';
     return `未识别的错误${extra}`;
   }

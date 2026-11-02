@@ -3,7 +3,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { webview } from '@kit.ArkWeb';
 import { window } from '@kit.ArkUI';
 import { QuadrantMeta, QUADRANTS, TaskItem, Q1 } from '../model/TaskItem';
-import { Account, accountInitial, avatarColor, AVATAR_COLORS } from '../model/Account';
+import { Account } from '../model/Account';
 import {
   AppSettings, COLOR_MODE_OPTIONS, MODE_DARK, MODE_LIGHT, MODE_SYSTEM, SettingOption,
   SORT_OPTIONS, WIDGET_LINE_OPTIONS
@@ -69,16 +69,10 @@ struct Index {
   @State ready: boolean = false;
   @State completedToday: number = 0;
 
-  /** 账号与设置 */
+  /** 账号与设置（账号仅作数据维度，不再提供管理界面） */
   @State account: Account = new Account();
-  @State accounts: Account[] = [];
   @State settings: AppSettings = new AppSettings();
-  @State showAccount: boolean = false;
   @State showSettings: boolean = false;
-  @State newName: string = '';
-  @State newColorIndex: number = 0;
-  @State renameId: number = 0;
-  @State renameText: string = '';
 
   /** 编辑面板 */
   @State showEditor: boolean = false;
@@ -144,7 +138,6 @@ struct Index {
       await AccountStore.init(context);
       await SettingsStore.init(context);
       this.settings = SettingsStore.current();
-      this.accounts = AccountStore.all();
       this.account = AccountStore.active();
 
       const repo: TaskRepository = TaskRepository.getInstance();
@@ -336,101 +329,6 @@ struct Index {
       }
     }
     return parts.join(' · ');
-  }
-
-  /* ==================== 账号 ==================== */
-
-  private async switchAccount(id: number): Promise<void> {
-    if (id === this.account.id) {
-      this.showAccount = false;
-      return;
-    }
-    try {
-      await AccountStore.switchTo(id);
-      this.account = AccountStore.active();
-      TaskRepository.getInstance().useAccount(this.account.id);
-      this.accounts = AccountStore.all();
-      this.showAccount = false;
-      this.refreshMsState();
-      await this.afterChange();
-      this.toast(`已切换到「${this.account.name}」`);
-    } catch (err) {
-      this.toast('切换失败：' + (err as Error).message);
-    }
-  }
-
-  private async createAccount(): Promise<void> {
-    const name: string = this.newName.trim();
-    if (name.length === 0) {
-      this.toast('请输入账号名称');
-      return;
-    }
-    try {
-      const created: Account = await AccountStore.create(name, this.newColorIndex);
-      this.newName = '';
-      this.newColorIndex = (created.colorIndex + 1) % AVATAR_COLORS.length;
-      this.accounts = AccountStore.all();
-      await this.switchAccount(created.id);
-    } catch (err) {
-      this.toast('创建失败：' + (err as Error).message);
-    }
-  }
-
-  private async commitRename(id: number): Promise<void> {
-    const name: string = this.renameText.trim();
-    if (name.length === 0) {
-      this.toast('名称不能为空');
-      return;
-    }
-    try {
-      await AccountStore.rename(id, name);
-      this.accounts = AccountStore.all();
-      this.account = AccountStore.active();
-      this.renameId = 0;
-      this.renameText = '';
-      await WidgetBridge.refreshAll(this.ctx);
-    } catch (err) {
-      this.toast('重命名失败：' + (err as Error).message);
-    }
-  }
-
-  private confirmDeleteAccount(acc: Account): void {
-    this.getUIContext().showAlertDialog({
-      title: '删除账号',
-      message: `将删除「${acc.name}」及其全部任务，不可恢复。`,
-      autoCancel: true,
-      primaryButton: {
-        value: '取消',
-        action: () => {
-        }
-      },
-      secondaryButton: {
-        value: '删除',
-        fontColor: $r('app.color.danger'),
-        action: () => {
-          this.doDeleteAccount(acc);
-        }
-      }
-    });
-  }
-
-  private async doDeleteAccount(acc: Account): Promise<void> {
-    try {
-      const removed: boolean = await AccountStore.remove(acc.id);
-      if (!removed) {
-        this.toast('至少保留一个账号');
-        return;
-      }
-      const repo: TaskRepository = TaskRepository.getInstance();
-      await repo.clearAccount(acc.id);
-      this.account = AccountStore.active();
-      repo.useAccount(this.account.id);
-      this.accounts = AccountStore.all();
-      await this.afterChange();
-      this.toast('账号已删除');
-    } catch (err) {
-      this.toast('删除失败：' + (err as Error).message);
-    }
   }
 
   /* ==================== 设置 ==================== */
@@ -971,19 +869,6 @@ struct Index {
 
   /* ==================== 视图 ==================== */
 
-  @Builder
-  AvatarView(acc: Account, size: number) {
-    Text(accountInitial(acc.name))
-      .fontSize(size * 0.42)
-      .fontWeight(FontWeight.Medium)
-      .fontColor('#FFFFFF')
-      .width(size)
-      .height(size)
-      .textAlign(TextAlign.Center)
-      .borderRadius(size / 2)
-      .backgroundColor(avatarColor(acc.colorIndex))
-  }
-
   /** 纯平面的「设置」图标：三条带滑块的横线（不用彩色 emoji 字形，避免 3D 拟真感） */
   @Builder
   SliderBar(lineWidth: number, knobX: number) {
@@ -1007,30 +892,12 @@ struct Index {
   @Builder
   Header() {
     Row() {
-      Stack() {
-        this.AvatarView(this.account, 34)
-      }
-      .onClick(() => {
-        this.showAccount = true;
-      })
-
-      Column() {
-        Text(this.account.name)
-          .fontSize(15)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.fg'))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(this.statsLine())
-          .fontSize(10)
-          .fontColor($r('app.color.muted'))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ top: 3 })
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-      .margin({ left: 9 })
+      Text(this.statsLine())
+        .fontSize(13)
+        .fontColor($r('app.color.fg'))
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .layoutWeight(1)
 
       Text('尺子')
         .fontSize(11)
@@ -1680,204 +1547,6 @@ struct Index {
   }
 
   @Builder
-  AccountPanel() {
-    Stack({ alignContent: Alignment.Bottom }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor($r('app.color.scrim'))
-        .onClick(() => {
-          this.showAccount = false;
-        })
-
-      Column() {
-        Row() {
-          Text('账号')
-            .fontSize(16)
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.fg'))
-          Blank()
-          Text('✕')
-            .fontSize(16)
-            .fontColor($r('app.color.muted'))
-            .padding(6)
-            .onClick(() => {
-              this.showAccount = false;
-            })
-        }
-        .width('100%')
-
-        Text('每个账号有独立的四象限清单，数据只存在本机。')
-          .fontSize(11)
-          .fontColor($r('app.color.muted'))
-          .width('100%')
-          .margin({ top: 4 })
-
-        Scroll() {
-          Column({ space: 8 }) {
-            ForEach(this.accounts, (acc: Account) => {
-              Column() {
-                Row() {
-                  this.AvatarView(acc, 32)
-                  Column() {
-                    if (this.renameId === acc.id) {
-                      TextInput({ text: this.renameText })
-                        .fontSize(13)
-                        .fontColor($r('app.color.fg'))
-                        .height(32)
-                        .backgroundColor($r('app.color.bg'))
-                        .borderRadius(8)
-                        .padding({ left: 8, right: 8 })
-                        .onChange((value: string) => {
-                          this.renameText = value;
-                        })
-                        .onSubmit(() => {
-                          this.commitRename(acc.id);
-                        })
-                    } else {
-                      Text(acc.name)
-                        .fontSize(13)
-                        .fontWeight(FontWeight.Medium)
-                        .fontColor($r('app.color.fg'))
-                        .maxLines(1)
-                        .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    }
-                    Text(acc.id === this.account.id ? '使用中' : '点击切换')
-                      .fontSize(10)
-                      .fontColor(acc.id === this.account.id ? $r('app.color.accent') : $r('app.color.muted'))
-                      .margin({ top: 2 })
-                  }
-                  .alignItems(HorizontalAlign.Start)
-                  .layoutWeight(1)
-                  .margin({ left: 10 })
-
-                  if (this.renameId === acc.id) {
-                    Text('确定')
-                      .fontSize(11)
-                      .fontColor($r('app.color.on_accent'))
-                      .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                      .backgroundColor($r('app.color.accent'))
-                      .borderRadius(10)
-                      .onClick(() => {
-                        this.commitRename(acc.id);
-                      })
-                  } else {
-                    Text('改名')
-                      .fontSize(11)
-                      .fontColor($r('app.color.accent'))
-                      .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                      .backgroundColor($r('app.color.accent_soft'))
-                      .borderRadius(10)
-                      .onClick(() => {
-                        this.renameId = acc.id;
-                        this.renameText = acc.name;
-                      })
-                    if (this.accounts.length > 1) {
-                      Text('删除')
-                        .fontSize(11)
-                        .fontColor($r('app.color.danger'))
-                        .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                        .backgroundColor($r('app.color.bg'))
-                        .borderRadius(10)
-                        .margin({ left: 6 })
-                        .onClick(() => {
-                          this.confirmDeleteAccount(acc);
-                        })
-                    }
-                  }
-                }
-                .width('100%')
-              }
-              .width('100%')
-              .padding(10)
-              .borderRadius(12)
-              .backgroundColor(acc.id === this.account.id ? $r('app.color.accent_soft') : $r('app.color.bg'))
-              .onClick(() => {
-                if (this.renameId !== acc.id) {
-                  this.switchAccount(acc.id);
-                }
-              })
-            }, (acc: Account) => `acc-${acc.id}`)
-
-            Column({ space: 8 }) {
-              Text('新建账号')
-                .fontSize(12)
-                .fontWeight(FontWeight.Medium)
-                .fontColor($r('app.color.fg'))
-                .width('100%')
-
-              TextInput({ placeholder: '账号名称，例如「工作」「家庭」', text: this.newName })
-                .fontSize(13)
-                .fontColor($r('app.color.fg'))
-                .placeholderColor($r('app.color.muted'))
-                .height(40)
-                .backgroundColor($r('app.color.bg'))
-                .borderRadius(10)
-                .padding({ left: 10, right: 10 })
-                .onChange((value: string) => {
-                  this.newName = value;
-                })
-                .onSubmit(() => {
-                  this.createAccount();
-                })
-
-              Row({ space: 8 }) {
-                ForEach(AVATAR_COLORS, (color: string, index: number) => {
-                  Text(accountInitial(this.newName))
-                    .fontSize(11)
-                    .fontColor('#FFFFFF')
-                    .width(26)
-                    .height(26)
-                    .textAlign(TextAlign.Center)
-                    .borderRadius(13)
-                    .backgroundColor(color)
-                    .border({
-                      width: this.newColorIndex === index ? 2 : 0,
-                      color: $r('app.color.fg')
-                    })
-                    .onClick(() => {
-                      this.newColorIndex = index;
-                    })
-                }, (color: string, index: number) => `color-${color}-${index}`)
-              }
-              .width('100%')
-
-              Button() {
-                Text('创建并切换')
-                  .fontSize(14)
-                  .fontColor($r('app.color.on_accent'))
-              }
-              .width('100%')
-              .height(42)
-              .backgroundColor($r('app.color.accent'))
-              .onClick(() => {
-                this.createAccount();
-              })
-            }
-            .width('100%')
-            .padding(10)
-            .borderRadius(12)
-            .backgroundColor($r('app.color.bg'))
-            .margin({ top: 4 })
-          }
-          .width('100%')
-          .padding({ top: 10, bottom: 10 })
-        }
-        .width('100%')
-        .layoutWeight(1)
-        .scrollBar(BarState.Off)
-      }
-      .width('100%')
-      .height('80%')
-      .padding({ left: 18, right: 18, top: 18, bottom: 22 })
-      .backgroundColor($r('app.color.card'))
-      .borderRadius({ topLeft: 20, topRight: 20 })
-    }
-    .width('100%')
-    .height('100%')
-  }
-
-  @Builder
   SectionTitle(text: string) {
     Text(text)
       .fontSize(12)
@@ -1885,6 +1554,21 @@ struct Index {
       .fontColor($r('app.color.fg'))
       .width('100%')
       .margin({ top: 16 })
+  }
+
+  /** 设置页统一操作按钮：同底色同字号（11），危险操作用红字 */
+  @Builder
+  Chip(label: string, onTap: () => void, danger: boolean) {
+    Text(label)
+      .fontSize(11)
+      .fontColor(danger ? $r('app.color.danger') : $r('app.color.fg'))
+      .padding({ left: 11, right: 11, top: 6, bottom: 6 })
+      .backgroundColor($r('app.color.bg'))
+      .borderRadius(10)
+      .border({ width: 0.5, color: $r('app.color.border') })
+      .onClick(() => {
+        onTap();
+      })
   }
 
   @Builder
@@ -1926,47 +1610,14 @@ struct Index {
 
         Scroll() {
           Column() {
-            this.SectionTitle('当前账号')
-            Row() {
-              this.AvatarView(this.account, 30)
-              Column() {
-                Text(this.account.name)
-                  .fontSize(13)
-                  .fontColor($r('app.color.fg'))
-                Text('切换 / 新建账号')
-                  .fontSize(10)
-                  .fontColor($r('app.color.muted'))
-                  .margin({ top: 2 })
-              }
-              .alignItems(HorizontalAlign.Start)
-              .layoutWeight(1)
-              .margin({ left: 9 })
-
-              Text('管理')
-                .fontSize(11)
-                .fontColor($r('app.color.accent'))
-                .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                .backgroundColor($r('app.color.accent_soft'))
-                .borderRadius(10)
-                .onClick(() => {
-                  this.showSettings = false;
-                  this.showAccount = true;
-                })
-            }
-            .width('100%')
-            .padding(10)
-            .borderRadius(12)
-            .backgroundColor($r('app.color.bg'))
-            .margin({ top: 8 })
-
             this.SectionTitle('任务排序')
             Flex({ wrap: FlexWrap.Wrap }) {
               ForEach(SORT_OPTIONS, (opt: SettingOption) => {
                 Text(opt.label)
-                  .fontSize(12)
+                  .fontSize(11)
                   .fontColor(this.settings.sortMode === opt.key ?
                     $r('app.color.on_accent') : $r('app.color.fg'))
-                  .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                  .padding({ left: 10, right: 10, top: 5, bottom: 5 })
                   .backgroundColor(this.settings.sortMode === opt.key ?
                     $r('app.color.accent') : $r('app.color.bg'))
                   .borderRadius(12)
@@ -1982,10 +1633,10 @@ struct Index {
             Flex({ wrap: FlexWrap.Wrap }) {
               ForEach(COLOR_MODE_OPTIONS, (opt: SettingOption) => {
                 Text(opt.label)
-                  .fontSize(12)
+                  .fontSize(11)
                   .fontColor(this.settings.colorMode === opt.key ?
                     $r('app.color.on_accent') : $r('app.color.fg'))
-                  .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                  .padding({ left: 10, right: 10, top: 5, bottom: 5 })
                   .backgroundColor(this.settings.colorMode === opt.key ?
                     $r('app.color.accent') : $r('app.color.bg'))
                   .borderRadius(12)
@@ -2016,10 +1667,10 @@ struct Index {
             Flex({ wrap: FlexWrap.Wrap }) {
               ForEach(WIDGET_LINE_OPTIONS, (opt: SettingOption) => {
                 Text(opt.label)
-                  .fontSize(12)
+                  .fontSize(11)
                   .fontColor(this.settings.widgetLines === opt.key ?
                     $r('app.color.on_accent') : $r('app.color.fg'))
-                  .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                  .padding({ left: 10, right: 10, top: 5, bottom: 5 })
                   .backgroundColor(this.settings.widgetLines === opt.key ?
                     $r('app.color.accent') : $r('app.color.bg'))
                   .borderRadius(12)
@@ -2052,35 +1703,16 @@ struct Index {
                 .layoutWeight(1)
 
                 if (this.msConnected) {
-                  Text(this.msBusy ? '同步中…' : '立即同步')
-                    .fontSize(11)
-                    .fontColor($r('app.color.accent'))
-                    .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                    .backgroundColor($r('app.color.accent_soft'))
-                    .borderRadius(10)
-                    .onClick(() => {
-                      this.msSyncNow();
-                    })
-                  Text('断开')
-                    .fontSize(11)
-                    .fontColor($r('app.color.danger'))
-                    .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                    .backgroundColor($r('app.color.bg'))
-                    .borderRadius(10)
-                    .margin({ left: 6 })
-                    .onClick(() => {
-                      this.msDisconnect();
-                    })
+                  this.Chip(this.msBusy ? '同步中…' : '立即同步', () => {
+                    this.msSyncNow();
+                  }, false)
+                  this.Chip('断开', () => {
+                    this.msDisconnect();
+                  }, true)
                 } else {
-                  Text('连接微软账号')
-                    .fontSize(11)
-                    .fontColor($r('app.color.on_accent'))
-                    .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-                    .backgroundColor($r('app.color.accent'))
-                    .borderRadius(10)
-                    .onClick(() => {
-                      this.openMsLogin();
-                    })
+                  this.Chip('连接微软账号', () => {
+                    this.openMsLogin();
+                  }, false)
                 }
               }
               .width('100%')
@@ -2169,15 +1801,9 @@ struct Index {
                 .layoutWeight(1)
                 .margin({ left: 9 })
 
-                Text('退出')
-                  .fontSize(11)
-                  .fontColor($r('app.color.danger'))
-                  .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                  .backgroundColor($r('app.color.bg'))
-                  .borderRadius(10)
-                  .onClick(() => {
-                    this.hwLogout();
-                  })
+                this.Chip('退出', () => {
+                  this.hwLogout();
+                }, true)
               } else {
                 Column() {
                   Text('未登录')
@@ -2192,18 +1818,9 @@ struct Index {
                 .alignItems(HorizontalAlign.Start)
                 .layoutWeight(1)
 
-                Button() {
-                  Text(this.hwBusy ? '登录中…' : '登录')
-                    .fontSize(12)
-                    .fontColor($r('app.color.on_accent'))
-                }
-                .height(32)
-                .borderRadius(16)
-                .padding({ left: 14, right: 14 })
-                .backgroundColor($r('app.color.accent'))
-                .onClick(() => {
+                this.Chip(this.hwBusy ? '登录中…' : '登录', () => {
                   this.hwLogin();
-                })
+                }, false)
               }
             }
             .width('100%')
@@ -2236,24 +1853,12 @@ struct Index {
             .width('100%')
 
             Row({ space: 8 }) {
-              Text(this.backupBusy ? '处理中…' : '备份到云端')
-                .fontSize(11)
-                .fontColor($r('app.color.on_accent'))
-                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-                .backgroundColor($r('app.color.accent'))
-                .borderRadius(10)
-                .onClick(() => {
-                  this.doBackupNow();
-                })
-              Text('从云端恢复')
-                .fontSize(11)
-                .fontColor($r('app.color.accent'))
-                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-                .backgroundColor($r('app.color.accent_soft'))
-                .borderRadius(10)
-                .onClick(() => {
-                  this.doRestore();
-                })
+              this.Chip(this.backupBusy ? '处理中…' : '备份到云端', () => {
+                this.doBackupNow();
+              }, false)
+              this.Chip('从云端恢复', () => {
+                this.doRestore();
+              }, false)
               Blank()
               Text(this.hwOpenId.length === 0 ? '需先登录华为账号' :
                 (this.lastBackupText.length > 0 ? `上次：${this.lastBackupText}` : '尚未备份'))
@@ -2264,24 +1869,12 @@ struct Index {
             .margin({ top: 8 })
 
             Row({ space: 8 }) {
-              Text('导出到文件')
-                .fontSize(11)
-                .fontColor($r('app.color.fg'))
-                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-                .backgroundColor($r('app.color.bg'))
-                .borderRadius(10)
-                .onClick(() => {
-                  this.doExportFile();
-                })
-              Text('从文件恢复')
-                .fontSize(11)
-                .fontColor($r('app.color.fg'))
-                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-                .backgroundColor($r('app.color.bg'))
-                .borderRadius(10)
-                .onClick(() => {
-                  this.doImportFile();
-                })
+              this.Chip('导出到文件', () => {
+                this.doExportFile();
+              }, false)
+              this.Chip('从文件恢复', () => {
+                this.doImportFile();
+              }, false)
             }
             .width('100%')
             .margin({ top: 8 })
@@ -2289,24 +1882,12 @@ struct Index {
 
             this.SectionTitle('数据')
             Row({ space: 10 }) {
-              Text('清理已完成')
-                .fontSize(12)
-                .fontColor($r('app.color.fg'))
-                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-                .backgroundColor($r('app.color.bg'))
-                .borderRadius(12)
-                .onClick(() => {
-                  this.confirmClearCompleted();
-                })
-              Text('清空本账号')
-                .fontSize(12)
-                .fontColor($r('app.color.danger'))
-                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-                .backgroundColor($r('app.color.bg'))
-                .borderRadius(12)
-                .onClick(() => {
-                  this.confirmClearAll();
-                })
+              this.Chip('清理已完成', () => {
+                this.confirmClearCompleted();
+              }, false)
+              this.Chip('清空本账号', () => {
+                this.confirmClearAll();
+              }, true)
             }
             .width('100%')
             .margin({ top: 8 })
@@ -2449,10 +2030,6 @@ struct Index {
 
       if (this.showDone) {
         this.DonePanel()
-      }
-
-      if (this.showAccount) {
-        this.AccountPanel()
       }
 
       if (this.showSettings) {
