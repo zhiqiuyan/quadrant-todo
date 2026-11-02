@@ -1,4 +1,5 @@
 import { common, ConfigurationConstant } from '@kit.AbilityKit';
+import { pasteboard } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { webview } from '@kit.ArkWeb';
 import { window } from '@kit.ArkUI';
@@ -18,11 +19,12 @@ import { MsAuthService } from '../data/MsAuthService';
 import { MsSyncService } from '../data/MsSyncService';
 import { HuaweiAuthService, HuaweiIdProfile } from '../data/HuaweiAuthService';
 import { BackupService, BackupResult } from '../data/BackupService';
+import { CalSyncService, CalSyncConfig } from '../data/CalSyncService';
 import { DateUtil } from '../common/DateUtil';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.5.2';
+const APP_VERSION: string = '1.5.3';
 
 
 /**
@@ -120,6 +122,16 @@ struct Index {
   @State lastBackupText: string = '';
   @State backupBusy: boolean = false;
 
+  /** 日历订阅（Gitee 托管 ICS） */
+  @State calEnabled: boolean = false;
+  @State calOwner: string = '';
+  @State calRepo: string = '';
+  @State calToken: string = '';
+  @State calUrl: string = '';
+  @State calLastSync: string = '';
+  @State calBusy: boolean = false;
+  private calSyncGuard: number = 0;
+
   /** 沉浸式安全区避让（vp） */
   @State topInset: number = 0;
   @State bottomInset: number = 0;
@@ -150,6 +162,8 @@ struct Index {
       this.refreshHuaweiState();
       this.autoBackup = BackupService.autoEnabled();
       this.refreshBackupState();
+      await CalSyncService.init(context);
+      this.refreshCalState();
       this.computeInsets();
       await this.reload();
       this.ready = true;
@@ -222,6 +236,95 @@ struct Index {
     }, 400);
   }
 
+  private fmtCalTime(ms: number): string {
+    const d: Date = new Date(ms);
+    const p = (n: number): string => n.toString().padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  private refreshCalState(): void {
+    const cfg: CalSyncConfig = CalSyncService.getConfig();
+    this.calEnabled = cfg.enabled;
+    this.calOwner = cfg.owner;
+    this.calRepo = cfg.repo;
+    this.calToken = cfg.token;
+    this.calUrl = CalSyncService.subscriptionUrl(cfg);
+    this.calLastSync = cfg.lastSync > 0 ? this.fmtCalTime(cfg.lastSync) : '';
+  }
+
+  private async calPersist(enabled: boolean): Promise<void> {
+    const cfg: CalSyncConfig = CalSyncService.getConfig();
+    cfg.enabled = enabled;
+    cfg.owner = this.calOwner.trim();
+    cfg.repo = this.calRepo.trim();
+    cfg.token = this.calToken.trim();
+    if (cfg.pathId.length === 0) {
+      cfg.pathId = CalSyncService.newCandidatePathId();
+    }
+    await CalSyncService.saveConfig(cfg);
+    this.refreshCalState();
+  }
+
+  private async calToggle(on: boolean): Promise<void> {
+    await this.calPersist(on);
+    if (on && CalSyncService.ready(CalSyncService.getConfig())) {
+      this.calSyncNow();
+    }
+  }
+
+  private async calSave(): Promise<void> {
+    if (this.calOwner.trim().length === 0 || this.calRepo.trim().length === 0 ||
+      this.calToken.trim().length === 0) {
+      this.toast('请填写 Gitee 用户名、仓库名和私人令牌');
+      return;
+    }
+    await this.calPersist(this.calEnabled);
+    this.toast('已保存');
+    if (CalSyncService.ready(CalSyncService.getConfig())) {
+      this.calSyncNow();
+    }
+  }
+
+  private calCopyUrl(): void {
+    if (this.calUrl.length === 0) {
+      this.toast('尚未生成订阅链接');
+      return;
+    }
+    const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, this.calUrl);
+    pasteboard.getSystemPasteboard().setData(data);
+    this.toast('订阅链接已复制，去 iPhone 日历 → 账户 → 添加订阅日历粘贴');
+  }
+
+  private async calSyncNow(): Promise<void> {
+    if (this.calBusy) {
+      return;
+    }
+    this.calBusy = true;
+    try {
+      await CalSyncService.syncNow();
+      this.refreshCalState();
+      this.toast('日历已同步到 Gitee');
+    } catch (err) {
+      this.toast((err as Error).message);
+    } finally {
+      this.calBusy = false;
+    }
+  }
+
+  /** 自动同步：60s 节流，失败静默 */
+  private calAutoSync(): void {
+    if (!CalSyncService.ready(CalSyncService.getConfig()) || this.calBusy) {
+      return;
+    }
+    const now: number = Date.now();
+    if (now - this.calSyncGuard < 60000) {
+      return;
+    }
+    this.calSyncGuard = now;
+    CalSyncService.syncNow().catch(() => {
+    });
+  }
+
   private async runSideWork(): Promise<void> {
     if (this.msConnected && MsAuthService.autoSync()) {
       this.msBackgroundSync();
@@ -229,6 +332,7 @@ struct Index {
     if (this.autoBackup && this.ctx !== undefined) {
       BackupService.autoBackup(this.ctx);
     }
+    this.calAutoSync();
   }
 
   private async loadDone(): Promise<void> {
@@ -1915,6 +2019,109 @@ struct Index {
               .padding({ top: 12, bottom: 12 })
               this.RowDivider()
               Text('导出/导入走系统文件选择器，不需要华为账号；云端备份需登录华为账号并在 AGC 开通云存储')
+                .fontSize(10)
+                .fontColor($r('app.color.muted'))
+                .width('100%')
+                .padding({ top: 10, bottom: 12 })
+            }
+            .width('100%')
+            .padding({ left: 14, right: 14 })
+            .backgroundColor($r('app.color.card'))
+            .borderRadius(16)
+            .alignItems(HorizontalAlign.Start)
+
+            /* ==================== 日历订阅 ==================== */
+            this.GroupTitle('日历订阅（iPhone / Google）')
+            Column() {
+              Row() {
+                Text('同步到日历订阅')
+                  .fontSize(14)
+                  .fontColor($r('app.color.fg'))
+                  .layoutWeight(1)
+                Toggle({ type: ToggleType.Switch, isOn: this.calEnabled })
+                  .selectedColor($r('app.color.accent'))
+                  .onChange((isOn: boolean) => {
+                    this.calToggle(isOn);
+                  })
+              }
+              .width('100%')
+              .padding({ top: 6, bottom: 6 })
+
+              if (this.calEnabled) {
+                this.RowDivider()
+                Column({ space: 8 }) {
+                  TextInput({ placeholder: 'Gitee 用户名', text: this.calOwner })
+                    .fontSize(12)
+                    .fontColor($r('app.color.fg'))
+                    .placeholderColor($r('app.color.muted'))
+                    .height(38)
+                    .width('100%')
+                    .backgroundColor($r('app.color.bg'))
+                    .borderRadius(10)
+                    .padding({ left: 10, right: 10 })
+                    .onChange((value: string) => {
+                      this.calOwner = value;
+                    })
+                  TextInput({ placeholder: '仓库名（须为公开仓库）', text: this.calRepo })
+                    .fontSize(12)
+                    .fontColor($r('app.color.fg'))
+                    .placeholderColor($r('app.color.muted'))
+                    .height(38)
+                    .width('100%')
+                    .backgroundColor($r('app.color.bg'))
+                    .borderRadius(10)
+                    .padding({ left: 10, right: 10 })
+                    .onChange((value: string) => {
+                      this.calRepo = value;
+                    })
+                  TextInput({ placeholder: 'Gitee 私人令牌（勾选 projects 权限）', text: this.calToken })
+                    .fontSize(12)
+                    .fontColor($r('app.color.fg'))
+                    .placeholderColor($r('app.color.muted'))
+                    .height(38)
+                    .width('100%')
+                    .backgroundColor($r('app.color.bg'))
+                    .borderRadius(10)
+                    .padding({ left: 10, right: 10 })
+                    .onChange((value: string) => {
+                      this.calToken = value;
+                    })
+                  Row({ space: 8 }) {
+                    this.Chip('保存配置', () => {
+                      this.calSave();
+                    }, false)
+                    this.Chip(this.calBusy ? '同步中…' : '立即同步', () => {
+                      this.calSyncNow();
+                    }, false)
+                    if (this.calUrl.length > 0) {
+                      this.Chip('复制订阅链接', () => {
+                        this.calCopyUrl();
+                      }, false)
+                    }
+                  }
+                  .width('100%')
+
+                  if (this.calUrl.length > 0) {
+                    Text(this.calUrl)
+                      .fontSize(10)
+                      .fontColor($r('app.color.muted'))
+                      .width('100%')
+                      .maxLines(2)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  }
+                  if (this.calLastSync.length > 0) {
+                    Text(`上次同步：${this.calLastSync}`)
+                      .fontSize(10)
+                      .fontColor($r('app.color.muted'))
+                      .width('100%')
+                  }
+                }
+                .width('100%')
+                .padding({ top: 12, bottom: 12 })
+                .alignItems(HorizontalAlign.Start)
+              }
+              this.RowDivider()
+              Text('带截止日的未完成任务会以「全天事件」推送到你的 Gitee 仓库；iPhone 在「日历 → 账户 → 添加订阅日历」粘贴链接即可，订阅约每 30 分钟自动刷新。链接含随机段，仅持有完整地址者可见。')
                 .fontSize(10)
                 .fontColor($r('app.color.muted'))
                 .width('100%')
