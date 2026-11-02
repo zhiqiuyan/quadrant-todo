@@ -21,7 +21,7 @@ import { DateUtil } from '../common/DateUtil';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.4.0';
+const APP_VERSION: string = '1.4.2';
 
 /**
  * 输入框独立成组件。
@@ -1546,14 +1546,34 @@ struct Index {
     .height('100%')
   }
 
+  /** 设置页一级分组标题 */
+  @Builder
+  GroupTitle(text: string) {
+    Row({ space: 6 }) {
+      Row()
+        .width(3)
+        .height(12)
+        .borderRadius(1.5)
+        .backgroundColor($r('app.color.accent'))
+      Text(text)
+        .fontSize(13)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.fg'))
+    }
+    .alignItems(VerticalAlign.Center)
+    .width('100%')
+    .margin({ top: 20, bottom: 2 })
+  }
+
+  /** 设置页二级小节标题 */
   @Builder
   SectionTitle(text: string) {
     Text(text)
-      .fontSize(12)
+      .fontSize(11)
       .fontWeight(FontWeight.Medium)
-      .fontColor($r('app.color.fg'))
+      .fontColor($r('app.color.muted'))
       .width('100%')
-      .margin({ top: 16 })
+      .margin({ top: 14 })
   }
 
   /** 设置页统一操作按钮：同底色同字号（11），危险操作用红字 */
@@ -1610,6 +1630,7 @@ struct Index {
 
         Scroll() {
           Column() {
+            this.GroupTitle('通用')
             this.SectionTitle('任务排序')
             Flex({ wrap: FlexWrap.Wrap }) {
               ForEach(SORT_OPTIONS, (opt: SettingOption) => {
@@ -1683,6 +1704,7 @@ struct Index {
             .width('100%')
             this.HintText('长按桌面空白处 → 卡片 → 四象限待办，可选 4*4（方）与 6*4（宽幅，平板 / 2in1）。')
 
+            this.GroupTitle('同步')
             this.SectionTitle('微软 To Do')
             Column({ space: 8 }) {
               Row() {
@@ -1838,6 +1860,7 @@ struct Index {
             }
             this.HintText('需要 AGC「账号服务」与 module.json5 中的 client_id 配置，见 README。')
 
+            this.GroupTitle('备份与数据')
             this.SectionTitle('云备份')
             Row() {
               Text('自动备份（改动后自动上传）')
@@ -1880,7 +1903,7 @@ struct Index {
             .margin({ top: 8 })
             this.HintText('导出/导入走系统文件选择器，不需要华为账号；云端备份需要登录华为账号并在 AGC 开通云存储。')
 
-            this.SectionTitle('数据')
+            this.SectionTitle('数据清理')
             Row({ space: 10 }) {
               this.Chip('清理已完成', () => {
                 this.confirmClearCompleted();
@@ -1892,25 +1915,36 @@ struct Index {
             .width('100%')
             .margin({ top: 8 })
 
-            this.SectionTitle('关于')
+            this.GroupTitle('关于')
             Column({ space: 6 }) {
               Row() {
-                Text('版本')
+                Text('应用')
                   .fontSize(12)
                   .fontColor($r('app.color.muted'))
                   .layoutWeight(1)
-                Text(APP_VERSION)
+                Text('四象限待办')
                   .fontSize(12)
                   .fontColor($r('app.color.fg'))
               }
               .width('100%')
 
               Row() {
-                Text('存储')
+                Text('版本')
                   .fontSize(12)
                   .fontColor($r('app.color.muted'))
                   .layoutWeight(1)
-                Text('本机数据库（RDB）')
+                Text(`v${APP_VERSION}`)
+                  .fontSize(12)
+                  .fontColor($r('app.color.fg'))
+              }
+              .width('100%')
+
+              Row() {
+                Text('系统要求')
+                  .fontSize(12)
+                  .fontColor($r('app.color.muted'))
+                  .layoutWeight(1)
+                Text('HarmonyOS 6.0（API 20）及以上')
                   .fontSize(12)
                   .fontColor($r('app.color.fg'))
               }
@@ -1927,7 +1961,13 @@ struct Index {
               }
               .width('100%')
 
-              Text('任务与账号均不上传，卸载应用即清除全部数据。')
+              Text('一款本地优先的四象限任务管理应用：按「重要 / 紧急」两维把待办放进四个象限，任务默认只存在本机数据库（RDB），可选同步到微软 To Do 或备份到云端。')
+                .fontSize(10)
+                .fontColor($r('app.color.muted'))
+                .width('100%')
+                .margin({ top: 6 })
+
+              Text('任务与账号均不上传（微软同步 / 云备份由你主动开启除外），卸载应用即清除全部本地数据。')
                 .fontSize(10)
                 .fontColor($r('app.color.muted'))
                 .width('100%')
