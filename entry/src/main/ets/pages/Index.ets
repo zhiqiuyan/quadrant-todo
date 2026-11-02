@@ -22,7 +22,7 @@ import { DateUtil } from '../common/DateUtil';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.5.1';
+const APP_VERSION: string = '1.5.2';
 
 
 /**
@@ -75,8 +75,6 @@ struct Index {
   @State account: Account = new Account();
   @State settings: AppSettings = new AppSettings();
   @State showSettings: boolean = false;
-  /** 设置二级页面：0=菜单 1=通用 2=数据管理 3=关于 */
-  @State settingsPage: number = 0;
 
   /** 编辑面板 */
   @State showEditor: boolean = false;
@@ -858,26 +856,6 @@ struct Index {
 
   /* ==================== 视图 ==================== */
 
-  /** 纯平面的「设置」图标：三条带滑块的横线（不用彩色 emoji 字形，避免 3D 拟真感） */
-  @Builder
-  SliderBar(lineWidth: number, knobX: number) {
-    Stack({ alignContent: Alignment.Start }) {
-      Row()
-        .width(lineWidth)
-        .height(1.5)
-        .borderRadius(1)
-        .backgroundColor($r('app.color.fg'))
-      Row()
-        .width(4.6)
-        .height(4.6)
-        .borderRadius(2.3)
-        .backgroundColor($r('app.color.fg'))
-        .offset({ x: knobX })
-    }
-    .width(lineWidth)
-    .height(5)
-  }
-
   @Builder
   Header() {
     Row() {
@@ -899,13 +877,13 @@ struct Index {
           this.openDone();
         })
 
-      Column({ space: 2.5 }) {
-        this.SliderBar(15, 2)
-        this.SliderBar(15, 8)
-        this.SliderBar(15, 4.5)
+      Row() {
+        SymbolGlyph($r('sys.symbol.gearshape'))
+          .fontSize(17)
+          .fontColor([$r('app.color.fg')])
       }
       .justifyContent(FlexAlign.Center)
-      .alignItems(HorizontalAlign.Center)
+      .alignItems(VerticalAlign.Center)
       .width(30)
       .height(28)
       .backgroundColor($r('app.color.card'))
@@ -913,7 +891,6 @@ struct Index {
       .margin({ left: 5 })
       .onClick(() => {
         this.showSettings = true;
-        this.settingsPage = 0;
       })
     }
     .width('100%')
@@ -1415,7 +1392,6 @@ struct Index {
             .onClick(() => {
               this.showRuler = false;
               this.showSettings = true;
-        this.settingsPage = 0;
             })
         }
         .width('100%')
@@ -1527,34 +1503,52 @@ struct Index {
     .height('100%')
   }
 
-  /** 设置页一级分组标题 */
+  /** 设置分组标题：灰色小字，位于卡片外（参考系统设置风格） */
   @Builder
   GroupTitle(text: string) {
-    Row({ space: 6 }) {
-      Row()
-        .width(3)
-        .height(12)
-        .borderRadius(1.5)
-        .backgroundColor($r('app.color.accent'))
-      Text(text)
-        .fontSize(13)
-        .fontWeight(FontWeight.Medium)
-        .fontColor($r('app.color.fg'))
-    }
-    .alignItems(VerticalAlign.Center)
-    .width('100%')
-    .margin({ top: 20, bottom: 2 })
-  }
-
-  /** 设置页二级小节标题 */
-  @Builder
-  SectionTitle(text: string) {
     Text(text)
-      .fontSize(11)
-      .fontWeight(FontWeight.Medium)
+      .fontSize(12)
       .fontColor($r('app.color.muted'))
       .width('100%')
-      .margin({ top: 14 })
+      .margin({ top: 18, bottom: 8 })
+  }
+
+  /** 设置卡片内的行：标题 + 右侧箭头 */
+  @Builder
+  RowArrow(title: string, onTap: () => void) {
+    Row() {
+      Text(title)
+        .fontSize(14)
+        .fontColor($r('app.color.fg'))
+        .layoutWeight(1)
+      SymbolGlyph($r('sys.symbol.chevron_right'))
+        .fontSize(13)
+        .fontColor([$r('app.color.muted')])
+    }
+    .width('100%')
+    .padding({ top: 13, bottom: 13 })
+    .onClick(() => {
+      onTap();
+    })
+  }
+
+  /** 设置卡片内的行分隔线 */
+  @Builder
+  RowDivider() {
+    Divider()
+      .strokeWidth(0.5)
+      .color($r('app.color.border'))
+  }
+
+  /** 设置选项 chip */
+  @Builder
+  OptChip(label: string, selected: boolean) {
+    Text(label)
+      .fontSize(11)
+      .fontColor(selected ? $r('app.color.on_accent') : $r('app.color.fg'))
+      .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+      .backgroundColor(selected ? $r('app.color.accent') : $r('app.color.bg'))
+      .borderRadius(12)
   }
 
   /** 设置页统一操作按钮：同底色同字号（11），危险操作用红字 */
@@ -1564,9 +1558,8 @@ struct Index {
       .fontSize(11)
       .fontColor(danger ? $r('app.color.danger') : $r('app.color.fg'))
       .padding({ left: 11, right: 11, top: 6, bottom: 6 })
-      .backgroundColor($r('app.color.card'))
+      .backgroundColor($r('app.color.bg'))
       .borderRadius(10)
-      .border({ width: 0.5, color: $r('app.color.border') })
       .onClick(() => {
         onTap();
       })
@@ -1579,48 +1572,6 @@ struct Index {
       .fontColor($r('app.color.muted'))
       .width('100%')
       .margin({ top: 4 })
-  }
-
-  private settingsPageTitle(): string {
-    if (this.settingsPage === 1) {
-      return '通用';
-    }
-    if (this.settingsPage === 2) {
-      return '数据管理';
-    }
-    return '关于';
-  }
-
-  /** 设置一级菜单行 */
-  @Builder
-  MenuRow(title: string, page: number) {
-    Row() {
-      Text(title)
-        .fontSize(14)
-        .fontWeight(FontWeight.Medium)
-        .fontColor($r('app.color.fg'))
-        .layoutWeight(1)
-
-      Text('›')
-        .fontSize(16)
-        .fontColor($r('app.color.muted'))
-    }
-    .width('100%')
-    .padding(12)
-    .borderRadius(12)
-    .backgroundColor($r('app.color.bg'))
-    .margin({ top: 8 })
-    .onClick(() => {
-      this.settingsPage = page;
-    })
-  }
-
-  /** 设置一级菜单 */
-  @Builder
-  SettingsMenu() {
-    this.MenuRow('通用', 1)
-    this.MenuRow('数据管理', 2)
-    this.MenuRow('关于', 3)
   }
 
   @Builder
@@ -1636,26 +1587,10 @@ struct Index {
 
       Column() {
         Row() {
-          if (this.settingsPage === 0) {
-            Text('设置')
-              .fontSize(16)
-              .fontWeight(FontWeight.Bold)
-              .fontColor($r('app.color.fg'))
-          } else {
-            Text('‹')
-              .fontSize(20)
-              .fontWeight(FontWeight.Medium)
-              .fontColor($r('app.color.fg'))
-              .width(30)
-              .onClick(() => {
-                this.settingsPage = 0;
-              })
-            Text(this.settingsPageTitle())
-              .fontSize(16)
-              .fontWeight(FontWeight.Bold)
-              .fontColor($r('app.color.fg'))
-              .margin({ left: 2 })
-          }
+          Text('设置')
+            .fontSize(18)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.fg'))
           Blank()
           Text('✕')
             .fontSize(16)
@@ -1669,97 +1604,180 @@ struct Index {
 
         Scroll() {
           Column() {
-            if (this.settingsPage === 0) {
-              this.SettingsMenu()
-            }
-            if (this.settingsPage === 2) {
+            /* ==================== 通用 ==================== */
+            this.GroupTitle('通用')
+            Column() {
+              this.RowArrow('归类说明', () => {
+                this.showSettings = false;
+                this.showRuler = true;
+              })
+              this.RowDivider()
+
               Column() {
-this.SectionTitle('华为账号')
-            Row() {
-              if (this.hwOpenId.length > 0) {
-                if (this.hwAvatar.length > 0) {
-                  Image(this.hwAvatar)
-                    .width(34)
-                    .height(34)
-                    .borderRadius(17)
-                    .objectFit(ImageFit.Cover)
-                } else {
-                  Text(this.hwNickName.length > 0 ? this.hwNickName.substring(0, 1) : '华')
-                    .fontSize(14)
-                    .fontColor('#FFFFFF')
-                    .width(34)
-                    .height(34)
-                    .textAlign(TextAlign.Center)
-                    .borderRadius(17)
-                    .backgroundColor($r('app.color.accent'))
+                Text('任务排序')
+                  .fontSize(14)
+                  .fontColor($r('app.color.fg'))
+                Flex({ wrap: FlexWrap.Wrap }) {
+                  ForEach(SORT_OPTIONS, (opt: SettingOption) => {
+                    Row() {
+                      this.OptChip(opt.label, this.settings.sortMode === opt.key)
+                    }
+                    .onClick(() => {
+                      this.changeSortMode(opt.key);
+                    })
+                    .margin({ right: 8, top: 8 })
+                  }, (opt: SettingOption) => `sort-${opt.key}`)
                 }
-                Column() {
-                  Text(this.hwNickName.length > 0 ? this.hwNickName : '已登录')
-                    .fontSize(13)
-                    .fontWeight(FontWeight.Medium)
-                    .fontColor($r('app.color.fg'))
-                  Text('华为账号已连接')
-                    .fontSize(10)
-                    .fontColor($r('app.color.muted'))
-                    .margin({ top: 2 })
-                }
-                .alignItems(HorizontalAlign.Start)
-                .layoutWeight(1)
-                .margin({ left: 9 })
-
-                this.Chip('退出', () => {
-                  this.hwLogout();
-                }, true)
-              } else {
-                Column() {
-                  Text('未登录')
-                    .fontSize(13)
-                    .fontWeight(FontWeight.Medium)
-                    .fontColor($r('app.color.fg'))
-                  Text('登录后可使用云备份与云同步')
-                    .fontSize(10)
-                    .fontColor($r('app.color.muted'))
-                    .margin({ top: 2 })
-                }
-                .alignItems(HorizontalAlign.Start)
-                .layoutWeight(1)
-
-                this.Chip(this.hwBusy ? '登录中…' : '登录', () => {
-                  this.hwLogin();
-                }, false)
+                .width('100%')
+                .margin({ top: 10 })
               }
+              .width('100%')
+              .padding({ top: 13, bottom: 13 })
+              .alignItems(HorizontalAlign.Start)
+              this.RowDivider()
+
+              Column() {
+                Text('外观')
+                  .fontSize(14)
+                  .fontColor($r('app.color.fg'))
+                Flex({ wrap: FlexWrap.Wrap }) {
+                  ForEach(COLOR_MODE_OPTIONS, (opt: SettingOption) => {
+                    Row() {
+                      this.OptChip(opt.label, this.settings.colorMode === opt.key)
+                    }
+                    .onClick(() => {
+                      this.changeColorMode(opt.key);
+                    })
+                    .margin({ right: 8, top: 8 })
+                  }, (opt: SettingOption) => `mode-${opt.key}`)
+                }
+                .width('100%')
+                .margin({ top: 10 })
+                Text('「跟随系统」与系统深色模式同步，切换后立即生效')
+                  .fontSize(10)
+                  .fontColor($r('app.color.muted'))
+                  .margin({ top: 8 })
+              }
+              .width('100%')
+              .padding({ top: 13, bottom: 13 })
+              .alignItems(HorizontalAlign.Start)
+              this.RowDivider()
+
+              Column() {
+                Text('大卡片（6*4）显示条数')
+                  .fontSize(14)
+                  .fontColor($r('app.color.fg'))
+                Flex({ wrap: FlexWrap.Wrap }) {
+                  ForEach(WIDGET_LINE_OPTIONS, (opt: SettingOption) => {
+                    Row() {
+                      this.OptChip(opt.label, this.settings.widgetLines === opt.key)
+                    }
+                    .onClick(() => {
+                      this.changeWidgetLines(opt.key);
+                    })
+                    .margin({ right: 8, top: 8 })
+                  }, (opt: SettingOption) => `lines-${opt.key}`)
+                }
+                .width('100%')
+                .margin({ top: 10 })
+              }
+              .width('100%')
+              .padding({ top: 13, bottom: 13 })
+              .alignItems(HorizontalAlign.Start)
             }
             .width('100%')
-            .padding(10)
-            .borderRadius(12)
+            .padding({ left: 14, right: 14 })
             .backgroundColor($r('app.color.card'))
-            .margin({ top: 8 })
+            .borderRadius(16)
+            .alignItems(HorizontalAlign.Start)
 
-            if (this.hwError.length > 0) {
-              Text(this.hwError)
-                .fontSize(10)
-                .fontColor($r('app.color.danger'))
-                .width('100%')
-                .margin({ top: 6 })
-            }
-            this.HintText('需要 AGC「账号服务」与 module.json5 中的 client_id 配置，见 README。')
+            /* ==================== 华为账号 ==================== */
+            this.GroupTitle('华为账号')
+            Column() {
+              Row() {
+                if (this.hwOpenId.length > 0) {
+                  if (this.hwAvatar.length > 0) {
+                    Image(this.hwAvatar)
+                      .width(34)
+                      .height(34)
+                      .borderRadius(17)
+                      .objectFit(ImageFit.Cover)
+                  } else {
+                    Text(this.hwNickName.length > 0 ? this.hwNickName.substring(0, 1) : '华')
+                      .fontSize(14)
+                      .fontColor('#FFFFFF')
+                      .width(34)
+                      .height(34)
+                      .textAlign(TextAlign.Center)
+                      .borderRadius(17)
+                      .backgroundColor($r('app.color.accent'))
+                  }
+                  Column() {
+                    Text(this.hwNickName.length > 0 ? this.hwNickName : '已登录')
+                      .fontSize(14)
+                      .fontColor($r('app.color.fg'))
+                    Text('华为账号已连接')
+                      .fontSize(10)
+                      .fontColor($r('app.color.muted'))
+                      .margin({ top: 2 })
+                  }
+                  .alignItems(HorizontalAlign.Start)
+                  .layoutWeight(1)
+                  .margin({ left: 10 })
 
-                          }
+                  this.Chip('退出', () => {
+                    this.hwLogout();
+                  }, true)
+                } else {
+                  Column() {
+                    Text('未登录')
+                      .fontSize(14)
+                      .fontColor($r('app.color.fg'))
+                    Text('登录后可使用云备份')
+                      .fontSize(10)
+                      .fontColor($r('app.color.muted'))
+                      .margin({ top: 2 })
+                  }
+                  .alignItems(HorizontalAlign.Start)
+                  .layoutWeight(1)
+
+                  this.Chip(this.hwBusy ? '登录中…' : '登录', () => {
+                    this.hwLogin();
+                  }, false)
+                }
+              }
               .width('100%')
-              .padding(12)
-              .backgroundColor($r('app.color.bg'))
-              .borderRadius(14)
-              .margin({ top: 10 })
-              Column() {
-this.GroupTitle('同步')
-            this.SectionTitle('微软 To Do')
-            Column({ space: 8 }) {
+              .padding({ top: 13, bottom: 13 })
+
+              if (this.hwError.length > 0) {
+                this.RowDivider()
+                Text(this.hwError)
+                  .fontSize(10)
+                  .fontColor($r('app.color.danger'))
+                  .width('100%')
+                  .padding({ top: 10, bottom: 10 })
+              }
+              this.RowDivider()
+              Text('需要 AGC「账号服务」与 module.json5 中的 client_id 配置，详见 README')
+                .fontSize(10)
+                .fontColor($r('app.color.muted'))
+                .width('100%')
+                .padding({ top: 10, bottom: 12 })
+            }
+            .width('100%')
+            .padding({ left: 14, right: 14 })
+            .backgroundColor($r('app.color.card'))
+            .borderRadius(16)
+            .alignItems(HorizontalAlign.Start)
+
+            /* ==================== 微软 To Do ==================== */
+            this.GroupTitle('微软 To Do')
+            Column() {
               Row() {
                 Column() {
                   Text(this.msConnected ?
                     (this.msProfile.length > 0 ? this.msProfile : '已连接') : '未连接')
-                    .fontSize(13)
-                    .fontWeight(FontWeight.Medium)
+                    .fontSize(14)
                     .fontColor($r('app.color.fg'))
                   Text(this.msConnected ?
                     (this.msLastSync.length > 0 ? this.msLastSync : '等待首次同步')
@@ -1779,49 +1797,54 @@ this.GroupTitle('同步')
                     this.msDisconnect();
                   }, true)
                 } else {
-                  this.Chip('连接微软账号', () => {
+                  this.Chip('连接', () => {
                     this.openMsLogin();
                   }, false)
                 }
               }
               .width('100%')
-              .padding(10)
-              .borderRadius(12)
-              .backgroundColor($r('app.color.card'))
+              .padding({ top: 13, bottom: 13 })
 
               if (!this.msConnected) {
-                Text('第一步：填写 Azure 应用 Client ID')
-                  .fontSize(11)
-                  .fontColor($r('app.color.muted'))
-                Row({ space: 8 }) {
-                  TextInput({ placeholder: 'Client ID（GUID）', text: this.msClientIdInput })
-                    .fontSize(12)
-                    .fontColor($r('app.color.fg'))
-                    .placeholderColor($r('app.color.muted'))
-                    .height(38)
-                    .layoutWeight(1)
-                    .backgroundColor($r('app.color.card'))
-                    .borderRadius(10)
-                    .padding({ left: 10, right: 10 })
-                    .onChange((value: string) => {
-                      this.msClientIdInput = value;
-                    })
-                  Text('保存')
+                this.RowDivider()
+                Column({ space: 8 }) {
+                  Text('第一步：填写 Azure 应用 Client ID')
                     .fontSize(11)
-                    .fontColor($r('app.color.accent'))
-                    .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-                    .backgroundColor($r('app.color.accent_soft'))
-                    .borderRadius(10)
-                    .onClick(() => {
-                      this.saveMsClientId();
-                    })
+                    .fontColor($r('app.color.muted'))
+                  Row({ space: 8 }) {
+                    TextInput({ placeholder: 'Client ID（GUID）', text: this.msClientIdInput })
+                      .fontSize(12)
+                      .fontColor($r('app.color.fg'))
+                      .placeholderColor($r('app.color.muted'))
+                      .height(38)
+                      .layoutWeight(1)
+                      .backgroundColor($r('app.color.bg'))
+                      .borderRadius(10)
+                      .padding({ left: 10, right: 10 })
+                      .onChange((value: string) => {
+                        this.msClientIdInput = value;
+                      })
+                    Text('保存')
+                      .fontSize(11)
+                      .fontColor($r('app.color.accent'))
+                      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                      .backgroundColor($r('app.color.accent_soft'))
+                      .borderRadius(10)
+                      .onClick(() => {
+                        this.saveMsClientId();
+                      })
+                  }
+                  .width('100%')
                 }
                 .width('100%')
+                .padding({ top: 12, bottom: 12 })
+                .alignItems(HorizontalAlign.Start)
               }
+              this.RowDivider()
 
               Row() {
-                Text('自动同步（改动后自动推送 / 拉取）')
-                  .fontSize(13)
+                Text('自动同步')
+                  .fontSize(14)
                   .fontColor($r('app.color.fg'))
                   .layoutWeight(1)
                 Toggle({ type: ToggleType.Switch, isOn: this.msAutoSync })
@@ -1831,259 +1854,181 @@ this.GroupTitle('同步')
                   })
               }
               .width('100%')
-              .margin({ top: 2 })
-            }
-            .width('100%')
-            .margin({ top: 8 })
-            this.HintText('四个象限对应微软 To Do 的四个同名清单，云端不存在则自动创建；冲突按最后修改时间胜出。需在 Azure 门户「应用注册」建公共客户端，回调填 nativeclient。')
-
-                          }
-              .width('100%')
-              .padding(12)
-              .backgroundColor($r('app.color.bg'))
-              .borderRadius(14)
-              .margin({ top: 10 })
-              Column() {
-this.GroupTitle('备份与数据')
-            this.SectionTitle('云备份')
-            Row() {
-              Text('自动备份（改动后自动上传）')
-                .fontSize(13)
-                .fontColor($r('app.color.fg'))
-                .layoutWeight(1)
-              Toggle({ type: ToggleType.Switch, isOn: this.autoBackup })
-                .selectedColor($r('app.color.accent'))
-                .onChange((isOn: boolean) => {
-                  this.toggleAutoBackup(isOn);
-                })
-            }
-            .width('100%')
-
-            Row({ space: 8 }) {
-              this.Chip(this.backupBusy ? '处理中…' : '备份到云端', () => {
-                this.doBackupNow();
-              }, false)
-              this.Chip('从云端恢复', () => {
-                this.doRestore();
-              }, false)
-              Blank()
-              Text(this.hwOpenId.length === 0 ? '需先登录华为账号' :
-                (this.lastBackupText.length > 0 ? `上次：${this.lastBackupText}` : '尚未备份'))
+              .padding({ top: 6, bottom: 6 })
+              this.RowDivider()
+              Text('四个象限对应微软 To Do 的四个同名清单，云端不存在则自动创建；冲突按最后修改时间胜出')
                 .fontSize(10)
                 .fontColor($r('app.color.muted'))
+                .width('100%')
+                .padding({ top: 10, bottom: 12 })
             }
             .width('100%')
-            .margin({ top: 8 })
+            .padding({ left: 14, right: 14 })
+            .backgroundColor($r('app.color.card'))
+            .borderRadius(16)
+            .alignItems(HorizontalAlign.Start)
 
-            Row({ space: 8 }) {
-              this.Chip('导出到文件', () => {
-                this.doExportFile();
-              }, false)
-              this.Chip('从文件恢复', () => {
-                this.doImportFile();
-              }, false)
-            }
-            .width('100%')
-            .margin({ top: 8 })
-            this.HintText('导出/导入走系统文件选择器，不需要华为账号；云端备份需要登录华为账号并在 AGC 开通云存储。')
-
-            this.SectionTitle('数据清理')
-            Row({ space: 10 }) {
-              this.Chip('清理已完成', () => {
-                this.confirmClearCompleted();
-              }, false)
-              this.Chip('清空本账号', () => {
-                this.confirmClearAll();
-              }, true)
-            }
-            .width('100%')
-            .margin({ top: 8 })
-
-                          }
+            /* ==================== 云备份 ==================== */
+            this.GroupTitle('云备份')
+            Column() {
+              Row() {
+                Text('自动备份')
+                  .fontSize(14)
+                  .fontColor($r('app.color.fg'))
+                  .layoutWeight(1)
+                Toggle({ type: ToggleType.Switch, isOn: this.autoBackup })
+                  .selectedColor($r('app.color.accent'))
+                  .onChange((isOn: boolean) => {
+                    this.toggleAutoBackup(isOn);
+                  })
+              }
               .width('100%')
-              .padding(12)
-              .backgroundColor($r('app.color.bg'))
-              .borderRadius(14)
-              .margin({ top: 10 })
-            }
-            if (this.settingsPage === 1) {
-              Column() {
-            Row() {
-              Text('归类说明')
-                .fontSize(14)
-                .fontWeight(FontWeight.Medium)
-                .fontColor($r('app.color.fg'))
-                .layoutWeight(1)
-              Text('›')
-                .fontSize(16)
+              .padding({ top: 6, bottom: 6 })
+              this.RowDivider()
+
+              Row({ space: 8 }) {
+                this.Chip(this.backupBusy ? '处理中…' : '备份到云端', () => {
+                  this.doBackupNow();
+                }, false)
+                this.Chip('从云端恢复', () => {
+                  this.doRestore();
+                }, false)
+                Blank()
+                Text(this.hwOpenId.length === 0 ? '需先登录华为账号' :
+                  (this.lastBackupText.length > 0 ? `上次：${this.lastBackupText}` : '尚未备份'))
+                  .fontSize(10)
+                  .fontColor($r('app.color.muted'))
+              }
+              .width('100%')
+              .padding({ top: 12, bottom: 12 })
+              this.RowDivider()
+
+              Row({ space: 8 }) {
+                this.Chip('导出到文件', () => {
+                  this.doExportFile();
+                }, false)
+                this.Chip('从文件恢复', () => {
+                  this.doImportFile();
+                }, false)
+              }
+              .width('100%')
+              .padding({ top: 12, bottom: 12 })
+              this.RowDivider()
+              Text('导出/导入走系统文件选择器，不需要华为账号；云端备份需登录华为账号并在 AGC 开通云存储')
+                .fontSize(10)
                 .fontColor($r('app.color.muted'))
+                .width('100%')
+                .padding({ top: 10, bottom: 12 })
             }
             .width('100%')
-            .onClick(() => {
-              this.showSettings = false;
-              this.showRuler = true;
-            })
+            .padding({ left: 14, right: 14 })
+            .backgroundColor($r('app.color.card'))
+            .borderRadius(16)
+            .alignItems(HorizontalAlign.Start)
 
-            this.SectionTitle('任务排序')
-            Flex({ wrap: FlexWrap.Wrap }) {
-              ForEach(SORT_OPTIONS, (opt: SettingOption) => {
-                Text(opt.label)
-                  .fontSize(11)
-                  .fontColor(this.settings.sortMode === opt.key ?
-                    $r('app.color.on_accent') : $r('app.color.fg'))
-                  .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                  .backgroundColor(this.settings.sortMode === opt.key ?
-                    $r('app.color.accent') : $r('app.color.bg'))
-                  .borderRadius(12)
-                  .margin({ right: 8, top: 8 })
-                  .onClick(() => {
-                    this.changeSortMode(opt.key);
-                  })
-              }, (opt: SettingOption) => `sort-${opt.key}`)
-            }
-            .width('100%')
-
-            this.SectionTitle('外观')
-            Flex({ wrap: FlexWrap.Wrap }) {
-              ForEach(COLOR_MODE_OPTIONS, (opt: SettingOption) => {
-                Text(opt.label)
-                  .fontSize(11)
-                  .fontColor(this.settings.colorMode === opt.key ?
-                    $r('app.color.on_accent') : $r('app.color.fg'))
-                  .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                  .backgroundColor(this.settings.colorMode === opt.key ?
-                    $r('app.color.accent') : $r('app.color.bg'))
-                  .borderRadius(12)
-                  .margin({ right: 8, top: 8 })
-                  .onClick(() => {
-                    this.changeColorMode(opt.key);
-                  })
-              }, (opt: SettingOption) => `mode-${opt.key}`)
-            }
-            .width('100%')
-            this.HintText('切换后立即生效；「跟随系统」与系统深色模式同步。')
-
-
-            this.SectionTitle('大卡片（6*4）显示条数')
-            Flex({ wrap: FlexWrap.Wrap }) {
-              ForEach(WIDGET_LINE_OPTIONS, (opt: SettingOption) => {
-                Text(opt.label)
-                  .fontSize(11)
-                  .fontColor(this.settings.widgetLines === opt.key ?
-                    $r('app.color.on_accent') : $r('app.color.fg'))
-                  .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                  .backgroundColor(this.settings.widgetLines === opt.key ?
-                    $r('app.color.accent') : $r('app.color.bg'))
-                  .borderRadius(12)
-                  .margin({ right: 8, top: 8 })
-                  .onClick(() => {
-                    this.changeWidgetLines(opt.key);
-                  })
-              }, (opt: SettingOption) => `lines-${opt.key}`)
-            }
-            .width('100%')
-            this.HintText('长按桌面空白处 → 卡片 → 象限待办，可选 4*4（方）与 6*4（宽幅，平板 / 2in1）。')
-
-                          }
+            /* ==================== 数据清理 ==================== */
+            this.GroupTitle('数据清理')
+            Column() {
+              Row({ space: 10 }) {
+                this.Chip('清理已完成', () => {
+                  this.confirmClearCompleted();
+                }, false)
+                this.Chip('清空本账号', () => {
+                  this.confirmClearAll();
+                }, true)
+              }
               .width('100%')
-              .padding(12)
-              .backgroundColor($r('app.color.bg'))
-              .borderRadius(14)
-              .margin({ top: 10 })
+              .padding({ top: 12, bottom: 12 })
             }
-            if (this.settingsPage === 3) {
-              Column() {
-            Column({ space: 6 }) {
+            .width('100%')
+            .padding({ left: 14, right: 14 })
+            .backgroundColor($r('app.color.card'))
+            .borderRadius(16)
+            .alignItems(HorizontalAlign.Start)
+
+            /* ==================== 关于 ==================== */
+            this.GroupTitle('关于')
+            Column() {
               Row() {
                 Text('应用')
-                  .fontSize(12)
-                  .fontColor($r('app.color.muted'))
+                  .fontSize(14)
+                  .fontColor($r('app.color.fg'))
                   .layoutWeight(1)
                 Text('象限待办')
                   .fontSize(12)
-                  .fontColor($r('app.color.fg'))
+                  .fontColor($r('app.color.muted'))
               }
               .width('100%')
+              .padding({ top: 13, bottom: 13 })
+              this.RowDivider()
 
               Row() {
                 Text('版本')
-                  .fontSize(12)
-                  .fontColor($r('app.color.muted'))
+                  .fontSize(14)
+                  .fontColor($r('app.color.fg'))
                   .layoutWeight(1)
                 Text(`v${APP_VERSION}`)
                   .fontSize(12)
-                  .fontColor($r('app.color.fg'))
+                  .fontColor($r('app.color.muted'))
               }
               .width('100%')
+              .padding({ top: 13, bottom: 13 })
+              this.RowDivider()
 
               Row() {
                 Text('系统要求')
+                  .fontSize(14)
+                  .fontColor($r('app.color.fg'))
+                  .layoutWeight(1)
+                Text('HarmonyOS 6.0（API 20）+')
                   .fontSize(12)
                   .fontColor($r('app.color.muted'))
-                  .layoutWeight(1)
-                Text('HarmonyOS 6.0（API 20）及以上')
-                  .fontSize(12)
-                  .fontColor($r('app.color.fg'))
               }
               .width('100%')
-
-              Row() {
-                Text('卡片尺寸')
-                  .fontSize(12)
-                  .fontColor($r('app.color.muted'))
-                  .layoutWeight(1)
-                Text('4*4 / 6*4')
-                  .fontSize(12)
-                  .fontColor($r('app.color.fg'))
-              }
-              .width('100%')
+              .padding({ top: 13, bottom: 13 })
+              this.RowDivider()
 
               Row() {
                 Text('源码')
-                  .fontSize(12)
-                  .fontColor($r('app.color.muted'))
+                  .fontSize(14)
+                  .fontColor($r('app.color.fg'))
                   .layoutWeight(1)
                 Text('GitHub · quadrant-todo')
                   .fontSize(12)
-                  .fontColor($r('app.color.fg'))
+                  .fontColor($r('app.color.muted'))
                   .maxLines(1)
               }
               .width('100%')
+              .padding({ top: 13, bottom: 13 })
+              this.RowDivider()
 
-              Text('源码说明：本应用是开源项目 quadrant-todo（github.com/jailedxiu/quadrant-todo）的 HarmonyOS 移植版，界面与数据层为 ArkTS 重写，遵循原项目开源许可，源码可自由查阅、学习与修改。')
-                .fontSize(10)
-                .fontColor($r('app.color.muted'))
-                .width('100%')
-                .margin({ top: 6 })
-
-              Text('免责条款：本应用按「现状」提供，不作任何明示或默示的担保。任务数据保存在本机，请定期使用备份功能；因设备故障、误操作、卸载或第三方服务（微软 To Do / 华为云）异常导致的数据丢失，开发者不承担任何责任。')
-                .fontSize(10)
-                .fontColor($r('app.color.muted'))
-                .width('100%')
-                .margin({ top: 4 })
-
-              Text('一款本地优先的四象限任务管理应用：按「重要 / 紧急」两维把待办放进四个象限，任务默认只存在本机数据库（RDB），可选同步到微软 To Do 或备份到云端。')
-                .fontSize(10)
-                .fontColor($r('app.color.muted'))
-                .width('100%')
-                .margin({ top: 6 })
-
-              Text('任务与账号均不上传（微软同步 / 云备份由你主动开启除外），卸载应用即清除全部本地数据。')
-                .fontSize(10)
-                .fontColor($r('app.color.muted'))
-                .width('100%')
-                .margin({ top: 4 })
-            }
-            .width('100%')
-            .padding({ top: 8, bottom: 20 })
-            .alignItems(HorizontalAlign.Start)
+              Column({ space: 6 }) {
+                Text('一款本地优先的四象限任务管理应用：按「重要 / 紧急」两维把待办放进四个象限，任务默认只存在本机数据库（RDB），可选同步到微软 To Do 或备份到云端。')
+                  .fontSize(10)
+                  .fontColor($r('app.color.muted'))
+                Text('任务与账号均不上传（微软同步 / 云备份由你主动开启除外），卸载应用即清除全部本地数据。')
+                  .fontSize(10)
+                  .fontColor($r('app.color.muted'))
+                Text('源码说明：本应用是开源项目 quadrant-todo（github.com/jailedxiu/quadrant-todo）的 HarmonyOS 移植版，界面与数据层为 ArkTS 重写，遵循原项目开源许可。')
+                  .fontSize(10)
+                  .fontColor($r('app.color.muted'))
+                Text('免责条款：本应用按「现状」提供，不作任何明示或默示的担保。任务数据保存在本机，请定期使用备份功能；因设备故障、误操作、卸载或第三方服务（微软 To Do / 华为云）异常导致的数据丢失，开发者不承担任何责任。')
+                  .fontSize(10)
+                  .fontColor($r('app.color.muted'))
               }
               .width('100%')
-              .padding(12)
-              .backgroundColor($r('app.color.bg'))
-              .borderRadius(14)
-              .margin({ top: 10 })
+              .padding({ top: 12, bottom: 16 })
+              .alignItems(HorizontalAlign.Start)
             }
+            .width('100%')
+            .padding({ left: 14, right: 14 })
+            .backgroundColor($r('app.color.card'))
+            .borderRadius(16)
+            .alignItems(HorizontalAlign.Start)
+
+            Text('')
+              .width('100%')
+              .height(10)
           }
           .width('100%')
           .alignItems(HorizontalAlign.Start)
@@ -2094,9 +2039,9 @@ this.GroupTitle('备份与数据')
         .align(Alignment.Top)
       }
       .width('100%')
-      .height('86%')
+      .height('88%')
       .padding({ left: 18, right: 18, top: 18, bottom: 22 })
-      .backgroundColor($r('app.color.card'))
+      .backgroundColor($r('app.color.bg'))
       .borderRadius({ topLeft: 20, topRight: 20 })
     }
     .width('100%')
