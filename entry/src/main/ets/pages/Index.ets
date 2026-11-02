@@ -22,7 +22,7 @@ import { DateUtil } from '../common/DateUtil';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.5.0';
+const APP_VERSION: string = '1.5.1';
 
 
 /**
@@ -205,6 +205,9 @@ struct Index {
    */
   private async afterChange(): Promise<void> {
     await this.reload();
+    // 卡片立即推送（纯本地构建，毫秒级）；网络类工作走防抖
+    WidgetBridge.refreshAll(this.ctx).catch(() => {
+    });
     this.scheduleSideWork();
   }
 
@@ -222,11 +225,6 @@ struct Index {
   }
 
   private async runSideWork(): Promise<void> {
-    try {
-      await WidgetBridge.refreshAll(this.ctx);
-    } catch (err) {
-      hilog.warn(DOMAIN, TAG, 'widget refresh failed: %{public}s', (err as Error).message);
-    }
     if (this.msConnected && MsAuthService.autoSync()) {
       this.msBackgroundSync();
     }
@@ -977,7 +975,7 @@ struct Index {
             ListItem() {
               this.TaskCard(item)
             }
-          }, (item: TaskItem) => `task-${item.id}`)
+          }, (item: TaskItem) => `task-${item.id}-${item.updatedAt}`)
         }
         .width('100%')
         .layoutWeight(1)
@@ -1511,7 +1509,7 @@ struct Index {
                 .padding({ top: 9, bottom: 9 })
                 .border({ width: { bottom: 0.5 }, color: $r('app.color.border') })
               }
-            }, (item: TaskItem) => `done-${item.id}`)
+            }, (item: TaskItem) => `done-${item.id}-${item.updatedAt}`)
           }
           .width('100%')
           .layoutWeight(1)
