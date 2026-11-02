@@ -21,7 +21,7 @@ import { DateUtil } from '../common/DateUtil';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.4.8';
+const APP_VERSION: string = '1.4.9';
 
 interface QuoteItem {
   text: string;
@@ -1645,8 +1645,8 @@ struct Index {
   /** 设置一级菜单 */
   @Builder
   SettingsMenu() {
-    this.MenuRow('数据管理', 2)
     this.MenuRow('通用', 1)
+    this.MenuRow('数据管理', 2)
     this.MenuRow('关于', 3)
   }
 
