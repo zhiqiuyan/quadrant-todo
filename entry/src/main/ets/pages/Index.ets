@@ -23,7 +23,7 @@ import { DateUtil } from '../common/DateUtil';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.6.0';
+const APP_VERSION: string = '1.0.0';
 /** 协议版本：内容有实质变更时 +1，用户需重新确认 */
 const AGREEMENT_VERSION: number = 1;
 const KEY_AGREE_ACCEPTED: string = 'agree_accepted';
