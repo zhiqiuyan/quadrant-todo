@@ -2,13 +2,10 @@ import { relationalStore } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
 import { TaskItem } from '../model/TaskItem';
 import { SORT_DUE, SORT_IMPORTANT } from '../model/AppSettings';
-import { MsTombstone } from '../model/MsTodo';
 
 const TABLE: string = 'task';
-const TOMBSTONE_TABLE: string = 'ms_tombstone';
 const COLUMNS: string[] = [
-  'id', 'account_id', 'title', 'quadrant', 'due_at', 'important', 'completed', 'created_at', 'updated_at',
-  'ms_id', 'ms_list_id', 'dirty'
+  'id', 'account_id', 'title', 'quadrant', 'due_at', 'important', 'completed', 'created_at', 'updated_at'
 ];
 
 const SQL_CREATE: string =
@@ -21,23 +18,11 @@ const SQL_CREATE: string =
   'important INTEGER NOT NULL DEFAULT 0, ' +
   'completed INTEGER NOT NULL DEFAULT 0, ' +
   'created_at INTEGER NOT NULL, ' +
-  'updated_at INTEGER NOT NULL, ' +
-  'ms_id TEXT NOT NULL DEFAULT \'\', ' +
-  'ms_list_id TEXT NOT NULL DEFAULT \'\', ' +
-  'dirty INTEGER NOT NULL DEFAULT 0)';
-
-const SQL_CREATE_TOMBSTONE: string =
-  'CREATE TABLE IF NOT EXISTS ms_tombstone (' +
-  'ms_id TEXT PRIMARY KEY, ' +
-  'list_id TEXT NOT NULL, ' +
-  'deleted_at INTEGER NOT NULL)';
+  'updated_at INTEGER NOT NULL)';
 
 /** 旧版本升级用；列已存在时会抛错，忽略即可 */
 const SQL_MIGRATIONS: string[] = [
-  'ALTER TABLE task ADD COLUMN account_id INTEGER NOT NULL DEFAULT 1',
-  'ALTER TABLE task ADD COLUMN ms_id TEXT NOT NULL DEFAULT \'\'',
-  'ALTER TABLE task ADD COLUMN ms_list_id TEXT NOT NULL DEFAULT \'\'',
-  'ALTER TABLE task ADD COLUMN dirty INTEGER NOT NULL DEFAULT 0'
+  'ALTER TABLE task ADD COLUMN account_id INTEGER NOT NULL DEFAULT 1'
 ];
 const SQL_INDEX_ACCOUNT: string = 'CREATE INDEX IF NOT EXISTS idx_task_account ON task(account_id, completed)';
 
@@ -73,7 +58,6 @@ export class TaskRepository {
           // 列已存在：说明是新库或已完成迁移，无需处理
         }
       }
-      await store.executeSql(SQL_CREATE_TOMBSTONE);
       await store.executeSql(SQL_INDEX_ACCOUNT);
     } catch (err) {
       throw new Error(`初始化数据库失败：${(err as Error).message}`);
@@ -119,9 +103,6 @@ export class TaskRepository {
         item.completed = rs.getLong(rs.getColumnIndex('completed')) === 1;
         item.createdAt = rs.getLong(rs.getColumnIndex('created_at'));
         item.updatedAt = rs.getLong(rs.getColumnIndex('updated_at'));
-        item.msId = rs.getString(rs.getColumnIndex('ms_id'));
-        item.msListId = rs.getString(rs.getColumnIndex('ms_list_id'));
-        item.dirty = rs.getLong(rs.getColumnIndex('dirty')) === 1;
         result.push(item);
       }
     } catch (err) {
@@ -206,8 +187,7 @@ export class TaskRepository {
     return count;
   }
 
-  async insert(title: string, quadrant: number, dueAt: number, important: boolean,
-    markDirty: boolean = true): Promise<number> {
+  async insert(title: string, quadrant: number, dueAt: number, important: boolean): Promise<number> {
     const now: number = Date.now();
     const values: relationalStore.ValuesBucket = {
       'account_id': this.accountId,
@@ -217,8 +197,7 @@ export class TaskRepository {
       'important': important ? 1 : 0,
       'completed': 0,
       'created_at': now,
-      'updated_at': now,
-      'dirty': markDirty ? 1 : 0
+      'updated_at': now
     };
     try {
       return await this.db().insert(TABLE, values);
@@ -228,14 +207,13 @@ export class TaskRepository {
   }
 
   async updateFields(id: number, title: string, quadrant: number, dueAt: number,
-    important: boolean, markDirty: boolean = true): Promise<void> {
+    important: boolean): Promise<void> {
     const values: relationalStore.ValuesBucket = {
       'title': title,
       'quadrant': quadrant,
       'due_at': dueAt,
       'important': important ? 1 : 0,
-      'updated_at': Date.now(),
-      'dirty': markDirty ? 1 : 0
+      'updated_at': Date.now()
     };
     const predicates: relationalStore.RdbPredicates = this.predicate();
     predicates.equalTo('id', id);
@@ -246,11 +224,10 @@ export class TaskRepository {
     }
   }
 
-  async setCompleted(id: number, completed: boolean, markDirty: boolean = true): Promise<void> {
+  async setCompleted(id: number, completed: boolean): Promise<void> {
     const values: relationalStore.ValuesBucket = {
       'completed': completed ? 1 : 0,
-      'updated_at': Date.now(),
-      'dirty': markDirty ? 1 : 0
+      'updated_at': Date.now()
     };
     const predicates: relationalStore.RdbPredicates = this.predicate();
     predicates.equalTo('id', id);
@@ -261,9 +238,7 @@ export class TaskRepository {
     }
   }
 
-  /** 删除并返回被删行（含微软同步字段），供墓碑记录用 */
-  async remove(id: number): Promise<TaskItem | undefined> {
-    const removed: TaskItem | undefined = await this.findById(id);
+  async remove(id: number): Promise<void> {
     const predicates: relationalStore.RdbPredicates = this.predicate();
     predicates.equalTo('id', id);
     try {
@@ -271,7 +246,6 @@ export class TaskRepository {
     } catch (err) {
       throw new Error(`删除任务失败：${(err as Error).message}`);
     }
-    return removed;
   }
 
   async findById(id: number): Promise<TaskItem | undefined> {
@@ -281,100 +255,11 @@ export class TaskRepository {
     return list.length > 0 ? list[0] : undefined;
   }
 
-  async findByMsId(msId: string): Promise<TaskItem | undefined> {
-    const predicates: relationalStore.RdbPredicates = this.predicate();
-    predicates.equalTo('ms_id', msId);
-    const list: TaskItem[] = await this.runQuery(predicates);
-    return list.length > 0 ? list[0] : undefined;
-  }
-
-  /** 本地有改动、待推送到微软端的任务 */
-  async listDirty(): Promise<TaskItem[]> {
-    const predicates: relationalStore.RdbPredicates = this.predicate();
-    predicates.equalTo('dirty', 1);
-    predicates.orderByAsc('updated_at');
-    return this.runQuery(predicates);
-  }
-
-  /** 全部任务（含已完成），清空账号前收集墓碑用 */
+  /** 全部任务（含已完成），备份与日历导出用 */
   async listAll(): Promise<TaskItem[]> {
     const predicates: relationalStore.RdbPredicates = this.predicate();
     predicates.orderByAsc('created_at');
     return this.runQuery(predicates);
-  }
-
-  /** 推送成功后回写同步状态并清除脏标记 */
-  async setSyncInfo(id: number, msId: string, msListId: string): Promise<void> {
-    const values: relationalStore.ValuesBucket = {
-      'ms_id': msId,
-      'ms_list_id': msListId,
-      'dirty': 0
-    };
-    const predicates: relationalStore.RdbPredicates = this.predicate();
-    predicates.equalTo('id', id);
-    try {
-      await this.db().update(values, predicates);
-    } catch (err) {
-      throw new Error(`回写同步状态失败：${(err as Error).message}`);
-    }
-  }
-
-  /** 同步中发现本地比远端新时打脏标记，等待下一轮推送 */
-  async markDirty(id: number): Promise<void> {
-    const values: relationalStore.ValuesBucket = {
-      'dirty': 1
-    };
-    const predicates: relationalStore.RdbPredicates = this.predicate();
-    predicates.equalTo('id', id);
-    try {
-      await this.db().update(values, predicates);
-    } catch (err) {
-      throw new Error(`标记待同步失败：${(err as Error).message}`);
-    }
-  }
-
-  /** 拉取远端新建：不标记脏（数据源就是远端） */
-  async insertRemote(title: string, quadrant: number, dueAt: number, important: boolean,
-    completed: boolean, msId: string, msListId: string, updatedAt: number): Promise<number> {
-    const values: relationalStore.ValuesBucket = {
-      'account_id': this.accountId,
-      'title': title,
-      'quadrant': quadrant,
-      'due_at': dueAt,
-      'important': important ? 1 : 0,
-      'completed': completed ? 1 : 0,
-      'created_at': updatedAt,
-      'updated_at': updatedAt,
-      'ms_id': msId,
-      'ms_list_id': msListId,
-      'dirty': 0
-    };
-    try {
-      return await this.db().insert(TABLE, values);
-    } catch (err) {
-      throw new Error(`写入远端任务失败：${(err as Error).message}`);
-    }
-  }
-
-  /** 拉取远端更新：覆盖本地字段，不标记脏 */
-  async applyRemote(id: number, title: string, quadrant: number, dueAt: number, important: boolean,
-    completed: boolean, updatedAt: number): Promise<void> {
-    const values: relationalStore.ValuesBucket = {
-      'title': title,
-      'quadrant': quadrant,
-      'due_at': dueAt,
-      'important': important ? 1 : 0,
-      'completed': completed ? 1 : 0,
-      'updated_at': updatedAt,
-      'dirty': 0
-    };
-    const predicates: relationalStore.RdbPredicates = this.predicate();
-    predicates.equalTo('id', id);
-    try {
-      await this.db().update(values, predicates);
-    } catch (err) {
-      throw new Error(`应用远端更新失败：${(err as Error).message}`);
-    }
   }
 
   /** 清理当前账号的全部已完成任务 */
@@ -406,63 +291,6 @@ export class TaskRepository {
       await this.db().delete(predicates);
     } catch (err) {
       throw new Error(`删除账号数据失败：${(err as Error).message}`);
-    }
-  }
-
-  /* ==================== 微软同步：墓碑 ==================== */
-
-  async addTombstone(msId: string, listId: string): Promise<void> {
-    if (msId.length === 0) {
-      return;
-    }
-    const values: relationalStore.ValuesBucket = {
-      'ms_id': msId,
-      'list_id': listId,
-      'deleted_at': Date.now()
-    };
-    try {
-      await this.db().insert(TOMBSTONE_TABLE, values);
-    } catch (err) {
-      // 主键冲突说明已在队列中，忽略
-    }
-  }
-
-  async listTombstones(): Promise<MsTombstone[]> {
-    const result: MsTombstone[] = [];
-    const predicates: relationalStore.RdbPredicates =
-      new relationalStore.RdbPredicates(TOMBSTONE_TABLE);
-    predicates.orderByAsc('deleted_at');
-    let rs: relationalStore.ResultSet | undefined = undefined;
-    try {
-      rs = await this.db().query(predicates, ['ms_id', 'list_id']);
-      while (rs.goToNextRow()) {
-        const item: MsTombstone = new MsTombstone();
-        item.msId = rs.getString(rs.getColumnIndex('ms_id'));
-        item.listId = rs.getString(rs.getColumnIndex('list_id'));
-        result.push(item);
-      }
-    } catch (err) {
-      throw new Error(`读取删除队列失败：${(err as Error).message}`);
-    } finally {
-      if (rs !== undefined) {
-        try {
-          rs.close();
-        } catch (closeErr) {
-          // 关闭失败不影响已读取的数据
-        }
-      }
-    }
-    return result;
-  }
-
-  async removeTombstone(msId: string): Promise<void> {
-    const predicates: relationalStore.RdbPredicates =
-      new relationalStore.RdbPredicates(TOMBSTONE_TABLE);
-    predicates.equalTo('ms_id', msId);
-    try {
-      await this.db().delete(predicates);
-    } catch (err) {
-      // 清理失败只影响重试，不阻断同步
     }
   }
 }

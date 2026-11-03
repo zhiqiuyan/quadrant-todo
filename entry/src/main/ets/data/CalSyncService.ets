@@ -4,7 +4,7 @@ import { common } from '@kit.AbilityKit';
 import { TaskRepository } from './TaskRepository';
 import { TaskItem, quadrantMeta } from '../model/TaskItem';
 import { PrefStore } from './PrefStore';
-import { MsHttp } from './MsHttp';
+import { HttpUtil } from './HttpUtil';
 
 const KEY_ENABLED: string = 'cal_enabled';
 const KEY_OWNER: string = 'cal_owner';
@@ -197,7 +197,7 @@ export class CalSyncService {
     let sha: string = '';
     let remoteContent: string = '';
     try {
-      const resp: string = (await MsHttp.send(http.RequestMethod.GET, fileUrl, undefined, undefined)).body;
+      const resp: string = (await HttpUtil.send(http.RequestMethod.GET, fileUrl, undefined, undefined)).body;
       const info: GiteeFileResp = JSON.parse(resp) as GiteeFileResp;
       sha = info.sha ?? '';
       remoteContent = (info.content ?? '').replace(/\n/g, '');
@@ -218,7 +218,7 @@ export class CalSyncService {
     if (sha.length > 0) {
       bodyObj['sha'] = sha;
     }
-    await MsHttp.send(http.RequestMethod.PUT, fileUrl, undefined, JSON.stringify(bodyObj));
+    await HttpUtil.send(http.RequestMethod.PUT, fileUrl, undefined, JSON.stringify(bodyObj));
     await CalSyncService.markSynced();
   }
 

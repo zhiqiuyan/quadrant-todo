@@ -1,30 +1,33 @@
 import { common, ConfigurationConstant } from '@kit.AbilityKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { webview } from '@kit.ArkWeb';
 import { window } from '@kit.ArkUI';
 import { QuadrantMeta, QUADRANTS, TaskItem, Q1 } from '../model/TaskItem';
 import { Account } from '../model/Account';
 import { dailyQuote, QuoteItem } from '../model/Quote';
 import {
-  AppSettings, COLOR_MODE_OPTIONS, MODE_DARK, MODE_LIGHT, MODE_SYSTEM, SettingOption,
-  SORT_OPTIONS, WIDGET_LINE_OPTIONS
+  AppSettings, COLOR_MODE_OPTIONS, FONT_FOLLOW, FONT_MODE_OPTIONS, fontRatioOf, MODE_DARK, MODE_LIGHT, MODE_SYSTEM,
+  SettingOption, SORT_OPTIONS, WIDGET_LINE_OPTIONS
 } from '../model/AppSettings';
-import { MsSyncResult } from '../model/MsTodo';
 import { TaskRepository } from '../data/TaskRepository';
 import { AccountStore } from '../data/AccountStore';
 import { SettingsStore } from '../data/SettingsStore';
+import { PrefStore } from '../data/PrefStore';
 import { WidgetBridge } from '../data/WidgetBridge';
-import { MsAuthService } from '../data/MsAuthService';
-import { MsSyncService } from '../data/MsSyncService';
 import { HuaweiAuthService, HuaweiIdProfile } from '../data/HuaweiAuthService';
 import { BackupService, BackupResult } from '../data/BackupService';
 import { CalSyncService, CalSyncConfig } from '../data/CalSyncService';
+import { LocalCalService, LocalCalResult } from '../data/LocalCalService';
+import { FontScaleService } from '../data/FontScaleService';
 import { DateUtil } from '../common/DateUtil';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.5.3';
+const APP_VERSION: string = '1.6.0';
+/** 协议版本：内容有实质变更时 +1，用户需重新确认 */
+const AGREEMENT_VERSION: number = 1;
+const KEY_AGREE_ACCEPTED: string = 'agree_accepted';
+const KEY_AGREE_VERSION: string = 'agree_version';
 
 
 /**
@@ -78,6 +81,12 @@ struct Index {
   @State settings: AppSettings = new AppSettings();
   @State showSettings: boolean = false;
 
+  /** 用户协议：false 时全屏展示协议页，同意前无法使用应用 */
+  @State agreed: boolean = true;
+
+  /** 设置页「关于」是否展开，默认折叠 */
+  @State aboutExpanded: boolean = false;
+
   /** 编辑面板 */
   @State showEditor: boolean = false;
   @State editingId: number = 0;
@@ -101,16 +110,6 @@ struct Index {
   @State inputQ3: string = '';
   @State inputQ4: string = '';
 
-  /** 微软 To Do 同步 */
-  @State msConnected: boolean = false;
-  @State msProfile: string = '';
-  @State msClientIdInput: string = '';
-  @State msAutoSync: boolean = true;
-  @State msLastSync: string = '';
-  @State msBusy: boolean = false;
-  @State showMsLogin: boolean = false;
-  @State msLoginUrl: string = '';
-  private webCtrl: webview.WebviewController = new webview.WebviewController();
 
   /** 华为账号与云备份 */
   @State hwNickName: string = '';
@@ -132,14 +131,28 @@ struct Index {
   @State calBusy: boolean = false;
   private calSyncGuard: number = 0;
 
+  /** 本机日历（HarmonyOS Calendar Kit） */
+  @State localCalEnabled: boolean = false;
+  @State localCalLast: string = '';
+  @State localCalBusy: boolean = false;
+  private localCalGuard: number = 0;
+
   /** 沉浸式安全区避让（vp） */
   @State topInset: number = 0;
   @State bottomInset: number = 0;
+
+  /** 系统当前字体缩放比，仅用于设置页展示 */
+  @State systemFontScale: number = 1;
 
   private ctx: common.UIAbilityContext | undefined = undefined;
 
   aboutToAppear(): void {
     this.boot();
+  }
+
+  /** 协议未确认前拦截返回键，只能选择同意或退出 */
+  onBackPress(): boolean {
+    return !this.agreed;
   }
 
   /* ==================== 数据 ==================== */
@@ -153,23 +166,24 @@ struct Index {
       await SettingsStore.init(context);
       this.settings = SettingsStore.current();
       this.account = AccountStore.active();
+      this.systemFontScale = FontScaleService.systemScale(context);
+      this.agreed = PrefStore.getBool(KEY_AGREE_ACCEPTED, false)
+        && PrefStore.getNumber(KEY_AGREE_VERSION, 0) >= AGREEMENT_VERSION;
 
       const repo: TaskRepository = TaskRepository.getInstance();
       await repo.init(context);
       repo.useAccount(this.account.id);
       this.applyColorMode(this.settings.colorMode);
-      this.refreshMsState();
       this.refreshHuaweiState();
       this.autoBackup = BackupService.autoEnabled();
       this.refreshBackupState();
       await CalSyncService.init(context);
       this.refreshCalState();
+      await LocalCalService.init(context);
+      this.refreshLocalCalState();
       this.computeInsets();
       await this.reload();
       this.ready = true;
-      if (this.msConnected && MsAuthService.autoSync()) {
-        this.msBackgroundSync();
-      }
       if (this.autoBackup && HuaweiAuthService.loggedIn()) {
         this.runAutoBackup();
       }
@@ -212,7 +226,7 @@ struct Index {
 
   /**
    * 任何写操作之后：只等本地库刷新（毫秒级）。
-   * 卡片推送、微软同步、云备份全部延后到后台执行，
+   * 卡片推送、云备份、日历同步全部延后到后台执行，
    * 否则「保存」要等好几秒（网络往返 + 卡片 IPC + 云端上传）才会有反应。
    */
   private async afterChange(): Promise<void> {
@@ -325,14 +339,114 @@ struct Index {
     });
   }
 
-  private async runSideWork(): Promise<void> {
-    if (this.msConnected && MsAuthService.autoSync()) {
-      this.msBackgroundSync();
+  /* ==================== 本机日历（系统日历） ==================== */
+
+  private refreshLocalCalState(): void {
+    this.localCalEnabled = LocalCalService.isEnabled();
+    const last: number = LocalCalService.getLastSync();
+    this.localCalLast = last > 0 ? this.fmtCalTime(last) : '';
+  }
+
+  /** 同步到系统日历：先要权限，再按「带截止日 + 未完成」对账 */
+  private async localCalSync(showToast: boolean): Promise<void> {
+    if (this.localCalBusy || this.ctx === undefined) {
+      return;
     }
+    this.localCalBusy = true;
+    try {
+      const granted: boolean = await LocalCalService.ensurePermission(this.ctx);
+      if (!granted) {
+        if (showToast) {
+          this.toast('未获得日历权限，请在系统设置中允许「象限待办」访问日历');
+        }
+        return;
+      }
+      const tasks: TaskItem[] = await TaskRepository.getInstance().listAll();
+      const result: LocalCalResult = await LocalCalService.syncNow(this.ctx, tasks);
+      this.refreshLocalCalState();
+      if (showToast) {
+        this.toast(`已同步到系统日历：${result.summary()}`);
+      }
+    } catch (err) {
+      if (showToast) {
+        this.toast((err as Error).message);
+      }
+    } finally {
+      this.localCalBusy = false;
+    }
+  }
+
+  private async localCalToggle(on: boolean): Promise<void> {
+    if (on) {
+      const granted: boolean = this.ctx === undefined ? false :
+        await LocalCalService.ensurePermission(this.ctx);
+      if (!granted) {
+        this.toast('需要日历权限才能同步，请在系统设置中允许「象限待办」访问日历');
+        this.localCalEnabled = false;
+        return;
+      }
+      await LocalCalService.setEnabled(true);
+      this.localCalEnabled = true;
+      await this.localCalSync(true);
+      return;
+    }
+    await LocalCalService.setEnabled(false);
+    this.refreshLocalCalState();
+    this.toast('已停止自动同步，已写入的事件保留在本机日历中');
+  }
+
+  private confirmLocalCalClear(): void {
+    this.getUIContext().showAlertDialog({
+      title: '清除本机日历事件',
+      message: '将删除「象限待办」写入系统日历的全部事件（不影响你手动创建的其他日程），是否继续？',
+      autoCancel: true,
+      primaryButton: {
+        value: '取消',
+        action: () => {
+        }
+      },
+      secondaryButton: {
+        value: '清除',
+        fontColor: $r('app.color.danger'),
+        action: () => {
+          this.doLocalCalClear();
+        }
+      }
+    });
+  }
+
+  private async doLocalCalClear(): Promise<void> {
+    if (this.ctx === undefined) {
+      return;
+    }
+    try {
+      const removed: number = await LocalCalService.clearAll(this.ctx);
+      this.localCalLast = '';
+      this.toast(`已清除 ${removed} 条日历事件`);
+    } catch (err) {
+      this.toast('清除失败：' + (err as Error).message);
+    }
+  }
+
+  /** 后台自动同步：仅开关打开时执行，60s 节流，失败静默（不打扰用户） */
+  private localCalAutoSync(): void {
+    if (!this.localCalEnabled || this.localCalBusy || this.ctx === undefined) {
+      return;
+    }
+    const now: number = Date.now();
+    if (now - this.localCalGuard < 60000) {
+      return;
+    }
+    this.localCalGuard = now;
+    this.localCalSync(false);
+  }
+
+  private async runSideWork(): Promise<void> {
     if (this.autoBackup && this.ctx !== undefined) {
       BackupService.autoBackup(this.ctx);
     }
     this.calAutoSync();
+    this.localCalAutoSync();
   }
 
   private async loadDone(): Promise<void> {
@@ -483,6 +597,48 @@ struct Index {
     this.saveSettings(next, false);
   }
 
+  /** 字号档位标签：跟随系统时同时显示系统当前比例 */
+  private fontModeLabel(): string {
+    if (this.settings.fontMode === FONT_FOLLOW) {
+      return `跟随系统 ${this.systemFontScale.toFixed(2)}×`;
+    }
+    return `自定义 ${fontRatioOf(this.settings.fontMode).toFixed(2)}×`;
+  }
+
+  /** 打开设置面板：顺带刷新系统字体比例，避免后台改过系统字号后显示过期 */
+  private openSettings(): void {
+    if (this.ctx !== undefined) {
+      this.systemFontScale = FontScaleService.systemScale(this.ctx);
+    }
+    this.showSettings = true;
+  }
+
+  /** 同意协议：记录接受事实与协议版本，之后不再弹出 */
+  private acceptAgreement(): void {
+    this.agreed = true;
+    PrefStore.put(KEY_AGREE_ACCEPTED, true).catch(() => {
+    });
+    PrefStore.put(KEY_AGREE_VERSION, AGREEMENT_VERSION).catch(() => {
+    });
+  }
+
+  /** 不同意：退出应用（数据仍保留在本机，下次启动会再次询问） */
+  private declineAgreement(): void {
+    if (this.ctx !== undefined) {
+      this.ctx.terminateSelf().catch(() => {
+      });
+    }
+  }
+
+  private changeFontMode(key: number): void {
+    const next: AppSettings = this.settings.copy();
+    next.fontMode = key;
+    if (this.ctx !== undefined) {
+      FontScaleService.applyNow(this.ctx, key);
+    }
+    this.saveSettings(next, false);
+  }
+
   private confirmClearAll(): void {
     this.getUIContext().showAlertDialog({
       title: '清空本账号',
@@ -506,12 +662,6 @@ struct Index {
   private async doClearAll(): Promise<void> {
     try {
       const repo: TaskRepository = TaskRepository.getInstance();
-      if (this.msConnected) {
-        const all: TaskItem[] = await repo.listAll();
-        for (let i = 0; i < all.length; i++) {
-          await MsSyncService.recordDeletion(all[i]);
-        }
-      }
       await repo.clearAll();
       await this.afterChange();
       this.toast('已清空');
@@ -612,11 +762,7 @@ struct Index {
 
   private async doDelete(id: number): Promise<void> {
     try {
-      const repo: TaskRepository = TaskRepository.getInstance();
-      const removed: TaskItem | undefined = await repo.remove(id);
-      if (removed !== undefined && this.msConnected) {
-        await MsSyncService.recordDeletion(removed);
-      }
+      await TaskRepository.getInstance().remove(id);
       this.showEditor = false;
       await this.afterChange();
     } catch (err) {
@@ -651,12 +797,6 @@ struct Index {
   private async doClearCompleted(): Promise<void> {
     try {
       const repo: TaskRepository = TaskRepository.getInstance();
-      if (this.msConnected) {
-        const done: TaskItem[] = await repo.listCompleted(500);
-        for (let i = 0; i < done.length; i++) {
-          await MsSyncService.recordDeletion(done[i]);
-        }
-      }
       await repo.clearCompleted();
       await this.afterChange();
       this.toast('已清理');
@@ -834,130 +974,6 @@ struct Index {
     }
   }
 
-  /* ==================== 微软 To Do ==================== */
-
-  /** 读取当前账号的微软连接状态到界面 */
-  private refreshMsState(): void {
-    MsAuthService.bind(this.account.id);
-    this.msConnected = MsAuthService.connected();
-    this.msProfile = MsAuthService.profileName();
-    this.msClientIdInput = MsAuthService.clientId();
-    this.msAutoSync = MsAuthService.autoSync();
-    this.msLastSync = MsAuthService.lastSync();
-  }
-
-  /** 后台静默同步：只在失败时提示，不抢焦点 */
-  private msSyncGuard: number = 0;
-
-  private async msBackgroundSync(): Promise<void> {
-    if (this.msBusy || !MsAuthService.connected()) {
-      return;
-    }
-    const now: number = Date.now();
-    // 15s 内不重复触发：连续编辑时不要每次都打一轮网络同步
-    if (now - this.msSyncGuard < 15000) {
-      return;
-    }
-    this.msSyncGuard = now;
-    this.msBusy = true;
-    try {
-      const result: MsSyncResult = await MsSyncService.sync();
-      this.msLastSync = MsAuthService.lastSync();
-      if (result.failed > 0) {
-        this.toast(result.message);
-      }
-      await this.reload();
-    } finally {
-      this.msBusy = false;
-    }
-  }
-
-  private async msSyncNow(): Promise<void> {
-    if (this.msBusy) {
-      return;
-    }
-    if (!this.msConnected) {
-      this.toast('请先连接微软账号');
-      return;
-    }
-    this.msBusy = true;
-    try {
-      const result: MsSyncResult = await MsSyncService.sync();
-      this.msLastSync = MsAuthService.lastSync();
-      this.toast(result.message);
-      await this.reload();
-    } finally {
-      this.msBusy = false;
-    }
-  }
-
-  private openMsLogin(): void {
-    if (!MsAuthService.hasClientId()) {
-      this.toast('请先填写并保存 Azure 应用 Client ID');
-      return;
-    }
-    this.msLoginUrl = MsAuthService.authorizeUrl();
-    this.showMsLogin = true;
-  }
-
-  /** Web 拦截：命中回调地址则阻断加载并接管 code */
-  private onWebNav(url: string): boolean {
-    if (MsAuthService.isRedirectUrl(url)) {
-      this.showMsLogin = false;
-      this.finishMsLogin(url);
-      return true;
-    }
-    return false;
-  }
-
-  private async finishMsLogin(url: string): Promise<void> {
-    this.msBusy = true;
-    try {
-      await MsAuthService.completeLogin(url);
-      this.refreshMsState();
-      this.toast(`已连接 ${this.msProfile.length > 0 ? this.msProfile : '微软账号'}`);
-      const result: MsSyncResult = await MsSyncService.initialPush();
-      this.msLastSync = MsAuthService.lastSync();
-      if (result.failed > 0 || result.pushed > 0) {
-        this.toast(result.message);
-      }
-      await this.reload();
-    } catch (err) {
-      this.toast((err as Error).message);
-    } finally {
-      this.msBusy = false;
-    }
-  }
-
-  private async saveMsClientId(): Promise<void> {
-    try {
-      await MsAuthService.setClientId(this.msClientIdInput);
-      this.msClientIdInput = MsAuthService.clientId();
-      this.toast('Client ID 已保存');
-    } catch (err) {
-      this.toast('保存失败：' + (err as Error).message);
-    }
-  }
-
-  private async toggleMsAutoSync(isOn: boolean): Promise<void> {
-    this.msAutoSync = isOn;
-    try {
-      await MsAuthService.setAutoSync(isOn);
-    } catch (err) {
-      this.toast('保存失败：' + (err as Error).message);
-    }
-  }
-
-  private async msDisconnect(): Promise<void> {
-    try {
-      await MsAuthService.disconnect();
-      this.refreshMsState();
-      this.toast('已断开微软账号');
-    } catch (err) {
-      this.toast('断开失败：' + (err as Error).message);
-    }
-  }
-
   /* ==================== 视图 ==================== */
 
   @Builder
@@ -994,7 +1010,7 @@ struct Index {
       .borderRadius(13)
       .margin({ left: 5 })
       .onClick(() => {
-        this.showSettings = true;
+        this.openSettings();
       })
     }
     .width('100%')
@@ -1354,7 +1370,7 @@ struct Index {
                 .fontColor($r('app.color.danger'))
             }
             .layoutWeight(1)
-            .height(44)
+            .constraintSize({ minHeight: 44 })
             .backgroundColor($r('app.color.bg'))
             .onClick(() => {
               this.confirmDelete(this.editingId, this.draftTitle);
@@ -1366,7 +1382,7 @@ struct Index {
               .fontColor($r('app.color.on_accent'))
           }
           .layoutWeight(1)
-          .height(44)
+          .constraintSize({ minHeight: 44 })
           .backgroundColor($r('app.color.accent'))
           .onClick(() => {
             this.saveDraft();
@@ -1495,7 +1511,7 @@ struct Index {
             .borderRadius(12)
             .onClick(() => {
               this.showRuler = false;
-              this.showSettings = true;
+              this.openSettings();
             })
         }
         .width('100%')
@@ -1679,6 +1695,100 @@ struct Index {
   }
 
   @Builder
+  AgreementSection(title: string, body: string) {
+    Column({ space: 6 }) {
+      Text(title)
+        .fontSize(15)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.fg'))
+      Text(body)
+        .fontSize(13)
+        .lineHeight(22)
+        .fontColor($r('app.color.fg'))
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  /** 首启用户协议页：全屏覆盖，同意前无法使用应用 */
+  @Builder
+  AgreementPanel() {
+    Column() {
+      Text('用户协议')
+        .fontSize(22)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.fg'))
+        .width('100%')
+      Text('请完整阅读用户协议与免责声明')
+        .fontSize(12)
+        .fontColor($r('app.color.muted'))
+        .width('100%')
+        .margin({ top: 4 })
+
+      Scroll() {
+        Column({ space: 16 }) {
+          Text('在使用 象限待办（下称「本软件」）之前，请仔细阅读并充分理解本协议与免责声明。点击「同意并继续」即视为您已阅读、理解并同意接受全部内容；如不同意，请点击「不同意并退出」，停止使用本软件。')
+            .fontSize(13)
+            .lineHeight(22)
+            .fontColor($r('app.color.fg'))
+            .width('100%')
+
+          this.AgreementSection('一、软件性质与知识产权',
+            '本软件由作者独立开发，源码通过 GitHub（仓库 quadrant-todo）公开，供学习研究与非商业使用；软件的界面设计、图标、文档等内容归作者所有。请在遵循仓库附带许可的前提下使用与分发，不得去除或篡改本软件的版权与来源声明后再分发，不得将本软件用于任何违法违规用途。')
+
+          this.AgreementSection('二、数据与隐私',
+            '任务数据默认仅保存在本机数据库中，本软件不会在后台上传您的任何数据。仅当您主动开启「云备份」「本机日历」「日历订阅」等功能时，相关数据才会传输到对应第三方服务，且可随时在设置中关闭。卸载本软件即清除全部本地数据。')
+
+          this.AgreementSection('三、第三方服务',
+            '华为账号、Gitee、系统日历等功能依赖相应第三方提供的服务，其可用性、准确性与安全性由服务提供方负责，作者对第三方服务的变更或中断不承担责任。')
+
+          this.AgreementSection('四、免责声明',
+            '本软件按「现状」提供，不作出任何形式的担保。因系统故障、误操作、卸载重装或其他原因导致的任务数据丢失或损坏，作者不承担责任；重要数据请通过「云备份」或「导出备份」定期自行备份。本软件写入系统日历、日历订阅等功能在具体设备上的实际表现以真机为准。')
+
+          this.AgreementSection('五、协议的更新',
+            '本协议可能随版本更新而调整。协议内容发生实质变更后，应用将在下次启动时重新提示确认；若您在提示后继续使用本软件，即视为接受更新后的协议。')
+        }
+        .width('100%')
+        .padding({ top: 10, bottom: 10 })
+      }
+      .layoutWeight(1)
+      .scrollBar(BarState.Auto)
+      .align(Alignment.Top)
+      .margin({ top: 14 })
+
+      Button() {
+        Text('同意并继续')
+          .fontSize(15)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.on_accent'))
+      }
+      .width('100%')
+      .height(44)
+      .backgroundColor($r('app.color.accent'))
+      .onClick(() => {
+        this.acceptAgreement();
+      })
+
+      Button() {
+        Text('不同意并退出')
+          .fontSize(15)
+          .fontColor($r('app.color.fg'))
+      }
+      .width('100%')
+      .height(44)
+      .backgroundColor($r('app.color.card'))
+      .margin({ top: 10 })
+      .onClick(() => {
+        this.declineAgreement();
+      })
+    }
+    .width('100%')
+    .height('100%')
+    .padding(20)
+    .backgroundColor($r('app.color.bg'))
+  }
+
+  @Builder
   SettingsPanel() {
     Stack({ alignContent: Alignment.Bottom }) {
       Column()
@@ -1730,7 +1840,7 @@ struct Index {
                       this.changeSortMode(opt.key);
                     })
                     .margin({ right: 8, top: 8 })
-                  }, (opt: SettingOption) => `sort-${opt.key}`)
+                  }, (opt: SettingOption) => `sort-${opt.key}-${this.settings.sortMode === opt.key ? 1 : 0}`)
                 }
                 .width('100%')
                 .margin({ top: 10 })
@@ -1753,11 +1863,49 @@ struct Index {
                       this.changeColorMode(opt.key);
                     })
                     .margin({ right: 8, top: 8 })
-                  }, (opt: SettingOption) => `mode-${opt.key}`)
+                  }, (opt: SettingOption) => `mode-${opt.key}-${this.settings.colorMode === opt.key ? 1 : 0}`)
                 }
                 .width('100%')
                 .margin({ top: 10 })
                 Text('「跟随系统」与系统深色模式同步，切换后立即生效')
+                  .fontSize(10)
+                  .fontColor($r('app.color.muted'))
+                  .margin({ top: 8 })
+              }
+              .width('100%')
+              .padding({ top: 13, bottom: 13 })
+              .alignItems(HorizontalAlign.Start)
+              this.RowDivider()
+
+              Column() {
+                Row() {
+                  Text('字体大小')
+                    .fontSize(14)
+                    .fontColor($r('app.color.fg'))
+                    .layoutWeight(1)
+                  Text(this.fontModeLabel())
+                    .fontSize(12)
+                    .fontColor($r('app.color.muted'))
+                }
+                .width('100%')
+
+                Flex({ wrap: FlexWrap.Wrap }) {
+                  ForEach(FONT_MODE_OPTIONS, (opt: SettingOption) => {
+                    Row() {
+                      this.OptChip(opt.label, this.settings.fontMode === opt.key)
+                    }
+                    .onClick(() => {
+                      this.changeFontMode(opt.key);
+                    })
+                    .margin({ right: 8, top: 8 })
+                  }, (opt: SettingOption) => `font-${opt.key}-${this.settings.fontMode === opt.key ? 1 : 0}`)
+                }
+                .width('100%')
+                .margin({ top: 10 })
+
+                Text(this.settings.fontMode === FONT_FOLLOW
+                  ? '字号随系统「设置 → 显示和亮度 → 字体大小」变化，应用最多放大 1.75 倍'
+                  : '自定义档位覆盖系统字号；改回「跟随系统」后重新打开应用即恢复跟随')
                   .fontSize(10)
                   .fontColor($r('app.color.muted'))
                   .margin({ top: 8 })
@@ -1780,7 +1928,7 @@ struct Index {
                       this.changeWidgetLines(opt.key);
                     })
                     .margin({ right: 8, top: 8 })
-                  }, (opt: SettingOption) => `lines-${opt.key}`)
+                  }, (opt: SettingOption) => `lines-${opt.key}-${this.settings.widgetLines === opt.key ? 1 : 0}`)
                 }
                 .width('100%')
                 .margin({ top: 10 })
@@ -1874,104 +2022,6 @@ struct Index {
             .borderRadius(16)
             .alignItems(HorizontalAlign.Start)
 
-            /* ==================== 微软 To Do ==================== */
-            this.GroupTitle('微软 To Do')
-            Column() {
-              Row() {
-                Column() {
-                  Text(this.msConnected ?
-                    (this.msProfile.length > 0 ? this.msProfile : '已连接') : '未连接')
-                    .fontSize(14)
-                    .fontColor($r('app.color.fg'))
-                  Text(this.msConnected ?
-                    (this.msLastSync.length > 0 ? this.msLastSync : '等待首次同步')
-                    : '把当前账号同步到微软 To Do')
-                    .fontSize(10)
-                    .fontColor($r('app.color.muted'))
-                    .margin({ top: 2 })
-                }
-                .alignItems(HorizontalAlign.Start)
-                .layoutWeight(1)
-
-                if (this.msConnected) {
-                  this.Chip(this.msBusy ? '同步中…' : '立即同步', () => {
-                    this.msSyncNow();
-                  }, false)
-                  this.Chip('断开', () => {
-                    this.msDisconnect();
-                  }, true)
-                } else {
-                  this.Chip('连接', () => {
-                    this.openMsLogin();
-                  }, false)
-                }
-              }
-              .width('100%')
-              .padding({ top: 13, bottom: 13 })
-
-              if (!this.msConnected) {
-                this.RowDivider()
-                Column({ space: 8 }) {
-                  Text('第一步：填写 Azure 应用 Client ID')
-                    .fontSize(11)
-                    .fontColor($r('app.color.muted'))
-                  Row({ space: 8 }) {
-                    TextInput({ placeholder: 'Client ID（GUID）', text: this.msClientIdInput })
-                      .fontSize(12)
-                      .fontColor($r('app.color.fg'))
-                      .placeholderColor($r('app.color.muted'))
-                      .height(38)
-                      .layoutWeight(1)
-                      .backgroundColor($r('app.color.bg'))
-                      .borderRadius(10)
-                      .padding({ left: 10, right: 10 })
-                      .onChange((value: string) => {
-                        this.msClientIdInput = value;
-                      })
-                    Text('保存')
-                      .fontSize(11)
-                      .fontColor($r('app.color.accent'))
-                      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-                      .backgroundColor($r('app.color.accent_soft'))
-                      .borderRadius(10)
-                      .onClick(() => {
-                        this.saveMsClientId();
-                      })
-                  }
-                  .width('100%')
-                }
-                .width('100%')
-                .padding({ top: 12, bottom: 12 })
-                .alignItems(HorizontalAlign.Start)
-              }
-              this.RowDivider()
-
-              Row() {
-                Text('自动同步')
-                  .fontSize(14)
-                  .fontColor($r('app.color.fg'))
-                  .layoutWeight(1)
-                Toggle({ type: ToggleType.Switch, isOn: this.msAutoSync })
-                  .selectedColor($r('app.color.accent'))
-                  .onChange((isOn: boolean) => {
-                    this.toggleMsAutoSync(isOn);
-                  })
-              }
-              .width('100%')
-              .padding({ top: 6, bottom: 6 })
-              this.RowDivider()
-              Text('四个象限对应微软 To Do 的四个同名清单，云端不存在则自动创建；冲突按最后修改时间胜出')
-                .fontSize(10)
-                .fontColor($r('app.color.muted'))
-                .width('100%')
-                .padding({ top: 10, bottom: 12 })
-            }
-            .width('100%')
-            .padding({ left: 14, right: 14 })
-            .backgroundColor($r('app.color.card'))
-            .borderRadius(16)
-            .alignItems(HorizontalAlign.Start)
-
             /* ==================== 云备份 ==================== */
             this.GroupTitle('云备份')
             Column() {
@@ -2019,6 +2069,58 @@ struct Index {
               .padding({ top: 12, bottom: 12 })
               this.RowDivider()
               Text('导出/导入走系统文件选择器，不需要华为账号；云端备份需登录华为账号并在 AGC 开通云存储')
+                .fontSize(10)
+                .fontColor($r('app.color.muted'))
+                .width('100%')
+                .padding({ top: 10, bottom: 12 })
+            }
+            .width('100%')
+            .padding({ left: 14, right: 14 })
+            .backgroundColor($r('app.color.card'))
+            .borderRadius(16)
+            .alignItems(HorizontalAlign.Start)
+
+            /* ==================== 本机日历 ==================== */
+            this.GroupTitle('本机日历')
+            Column() {
+              Row() {
+                Column() {
+                  Text('同步到系统日历')
+                    .fontSize(14)
+                    .fontColor($r('app.color.fg'))
+                  Text(this.localCalEnabled ?
+                    (this.localCalLast.length > 0 ? `上次同步：${this.localCalLast}` : '等待首次同步')
+                    : '带截止日的待办写成全天事件')
+                    .fontSize(10)
+                    .fontColor($r('app.color.muted'))
+                    .margin({ top: 2 })
+                }
+                .alignItems(HorizontalAlign.Start)
+                .layoutWeight(1)
+                Toggle({ type: ToggleType.Switch, isOn: this.localCalEnabled })
+                  .selectedColor($r('app.color.accent'))
+                  .onChange((isOn: boolean) => {
+                    this.localCalToggle(isOn);
+                  })
+              }
+              .width('100%')
+              .padding({ top: 13, bottom: 13 })
+
+              if (this.localCalEnabled) {
+                this.RowDivider()
+                Row({ space: 8 }) {
+                  this.Chip(this.localCalBusy ? '同步中…' : '立即同步', () => {
+                    this.localCalSync(true);
+                  }, false)
+                  this.Chip('清除事件', () => {
+                    this.confirmLocalCalClear();
+                  }, true)
+                }
+                .width('100%')
+                .padding({ top: 12, bottom: 12 })
+              }
+              this.RowDivider()
+              Text('带截止日、未完成的任务会以「全天事件」写入系统默认日历账户，完成后自动移除。只操作本应用创建的事件，不会改动你手动添加的日程；首次同步需授予日历读写权限。')
                 .fontSize(10)
                 .fontColor($r('app.color.muted'))
                 .width('100%')
@@ -2156,76 +2258,91 @@ struct Index {
             /* ==================== 关于 ==================== */
             this.GroupTitle('关于')
             Column() {
+              /* 折叠头：点按展开 / 收起 */
               Row() {
-                Text('应用')
-                  .fontSize(14)
-                  .fontColor($r('app.color.fg'))
-                  .layoutWeight(1)
                 Text('象限待办')
-                  .fontSize(12)
-                  .fontColor($r('app.color.muted'))
-              }
-              .width('100%')
-              .padding({ top: 13, bottom: 13 })
-              this.RowDivider()
-
-              Row() {
-                Text('版本')
                   .fontSize(14)
                   .fontColor($r('app.color.fg'))
                   .layoutWeight(1)
                 Text(`v${APP_VERSION}`)
                   .fontSize(12)
                   .fontColor($r('app.color.muted'))
+                SymbolGlyph($r('sys.symbol.chevron_down'))
+                  .fontSize(13)
+                  .fontColor([$r('app.color.muted')])
+                  .margin({ left: 6 })
+                  .rotate({ angle: this.aboutExpanded ? 180 : 0 })
               }
               .width('100%')
               .padding({ top: 13, bottom: 13 })
-              this.RowDivider()
+              .onClick(() => {
+                this.aboutExpanded = !this.aboutExpanded;
+              })
 
-              Row() {
-                Text('系统要求')
-                  .fontSize(14)
-                  .fontColor($r('app.color.fg'))
-                  .layoutWeight(1)
-                Text('HarmonyOS 6.0（API 20）+')
-                  .fontSize(12)
-                  .fontColor($r('app.color.muted'))
-              }
-              .width('100%')
-              .padding({ top: 13, bottom: 13 })
-              this.RowDivider()
+              if (this.aboutExpanded) {
+                this.RowDivider()
 
-              Row() {
-                Text('源码')
-                  .fontSize(14)
-                  .fontColor($r('app.color.fg'))
-                  .layoutWeight(1)
-                Text('GitHub · quadrant-todo')
-                  .fontSize(12)
-                  .fontColor($r('app.color.muted'))
-                  .maxLines(1)
-              }
-              .width('100%')
-              .padding({ top: 13, bottom: 13 })
-              this.RowDivider()
+                Row() {
+                  Text('应用')
+                    .fontSize(14)
+                    .fontColor($r('app.color.fg'))
+                    .layoutWeight(1)
+                  Text('象限待办')
+                    .fontSize(12)
+                    .fontColor($r('app.color.muted'))
+                }
+                .width('100%')
+                .padding({ top: 13, bottom: 13 })
 
-              Column({ space: 6 }) {
-                Text('一款本地优先的四象限任务管理应用：按「重要 / 紧急」两维把待办放进四个象限，任务默认只存在本机数据库（RDB），可选同步到微软 To Do 或备份到云端。')
-                  .fontSize(10)
-                  .fontColor($r('app.color.muted'))
-                Text('任务与账号均不上传（微软同步 / 云备份由你主动开启除外），卸载应用即清除全部本地数据。')
-                  .fontSize(10)
-                  .fontColor($r('app.color.muted'))
-                Text('源码说明：本应用是开源项目 quadrant-todo（github.com/jailedxiu/quadrant-todo）的 HarmonyOS 移植版，界面与数据层为 ArkTS 重写，遵循原项目开源许可。')
-                  .fontSize(10)
-                  .fontColor($r('app.color.muted'))
-                Text('免责条款：本应用按「现状」提供，不作任何明示或默示的担保。任务数据保存在本机，请定期使用备份功能；因设备故障、误操作、卸载或第三方服务（微软 To Do / 华为云）异常导致的数据丢失，开发者不承担任何责任。')
-                  .fontSize(10)
-                  .fontColor($r('app.color.muted'))
+                this.RowDivider()
+
+                Row() {
+                  Text('系统要求')
+                    .fontSize(14)
+                    .fontColor($r('app.color.fg'))
+                    .layoutWeight(1)
+                  Text('HarmonyOS 6.0（API 20）+')
+                    .fontSize(12)
+                    .fontColor($r('app.color.muted'))
+                }
+                .width('100%')
+                .padding({ top: 13, bottom: 13 })
+
+                this.RowDivider()
+
+                Row() {
+                  Text('源码')
+                    .fontSize(14)
+                    .fontColor($r('app.color.fg'))
+                    .layoutWeight(1)
+                  Text('GitHub · quadrant-todo')
+                    .fontSize(12)
+                    .fontColor($r('app.color.muted'))
+                    .maxLines(1)
+                }
+                .width('100%')
+                .padding({ top: 13, bottom: 13 })
+
+                this.RowDivider()
+
+                Column({ space: 6 }) {
+                  Text('一款本地优先的四象限任务管理应用：按「重要 / 紧急」两维把待办放进四个象限，任务默认只存在本机数据库（RDB），可选备份到云端或写入系统日历。')
+                    .fontSize(10)
+                    .fontColor($r('app.color.muted'))
+                  Text('任务与账号均不上传（云备份由你主动开启除外），卸载应用即清除全部本地数据。')
+                    .fontSize(10)
+                    .fontColor($r('app.color.muted'))
+                  Text('源码说明：本应用是开源项目 quadrant-todo（github.com/jailedxiu/quadrant-todo）的 HarmonyOS 移植版，界面与数据层为 ArkTS 重写，遵循原项目开源许可。')
+                    .fontSize(10)
+                    .fontColor($r('app.color.muted'))
+                  Text('免责条款：本应用按「现状」提供，不作任何明示或默示的担保。任务数据保存在本机，请定期使用备份功能；因设备故障、误操作、卸载或第三方服务（华为云 / Gitee）异常导致的数据丢失，开发者不承担任何责任。')
+                    .fontSize(10)
+                    .fontColor($r('app.color.muted'))
+                }
+                .width('100%')
+                .padding({ top: 12, bottom: 16 })
+                .alignItems(HorizontalAlign.Start)
               }
-              .width('100%')
-              .padding({ top: 12, bottom: 16 })
-              .alignItems(HorizontalAlign.Start)
             }
             .width('100%')
             .padding({ left: 14, right: 14 })
@@ -2253,49 +2370,6 @@ struct Index {
     }
     .width('100%')
     .height('100%')
-  }
-
-  @Builder
-  MsLoginPanel() {
-    Column() {
-      Row() {
-        Column() {
-          Text('登录 Microsoft 账号')
-            .fontSize(16)
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.fg'))
-          Text('登录完成会自动返回；仅授权读写你的待办')
-            .fontSize(10)
-            .fontColor($r('app.color.muted'))
-            .margin({ top: 2 })
-        }
-        .alignItems(HorizontalAlign.Start)
-        .layoutWeight(1)
-
-        Text('✕')
-          .fontSize(16)
-          .fontColor($r('app.color.muted'))
-          .padding(6)
-          .onClick(() => {
-            this.showMsLogin = false;
-          })
-      }
-      .width('100%')
-      .padding({ left: 14, right: 14, top: 12, bottom: 8 })
-
-      Web({ src: this.msLoginUrl, controller: this.webCtrl })
-        .javaScriptAccess(true)
-        .domStorageAccess(true)
-        .zoomAccess(false)
-        .width('100%')
-        .layoutWeight(1)
-        .onLoadIntercept((event: OnLoadInterceptEvent) => {
-          return this.onWebNav(event.data.getRequestUrl());
-        })
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor($r('app.color.bg'))
   }
 
   build() {
@@ -2337,8 +2411,8 @@ struct Index {
         this.SettingsPanel()
       }
 
-      if (this.showMsLogin) {
-        this.MsLoginPanel()
+      if (!this.agreed) {
+        this.AgreementPanel()
       }
     }
     .width('100%')

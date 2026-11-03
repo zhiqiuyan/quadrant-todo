@@ -2,7 +2,8 @@ import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.Ab
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { SettingsStore } from '../data/SettingsStore';
-import { MODE_DARK, MODE_LIGHT } from '../model/AppSettings';
+import { FontScaleService } from '../data/FontScaleService';
+import { MODE_DARK, MODE_LIGHT, AppSettings } from '../model/AppSettings';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
@@ -17,8 +18,8 @@ export default class EntryAbility extends UIAbility {
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
-    // 先把外观设置应用好，再加载页面，避免启动瞬间的浅色闪烁
-    this.applyAppearance().then(() => {
+    // 先把外观与字体设置应用好，再加载页面，避免启动瞬间的浅色闪烁与字号跳变
+    this.applyLaunchPreferences().then(() => {
       windowStage.loadContent('pages/Index', async (err) => {
         if (err.code) {
           hilog.error(DOMAIN, TAG, 'Failed to load the content. Cause: %{public}s', JSON.stringify(err));
@@ -37,10 +38,11 @@ export default class EntryAbility extends UIAbility {
     });
   }
 
-  private async applyAppearance(): Promise<void> {
+  private async applyLaunchPreferences(): Promise<void> {
     try {
       await SettingsStore.init(this.context);
-      const mode: number = SettingsStore.current().colorMode;
+      const settings: AppSettings = SettingsStore.current();
+      const mode: number = settings.colorMode;
       let target: ConfigurationConstant.ColorMode = ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET;
       if (mode === MODE_DARK) {
         target = ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
@@ -48,8 +50,10 @@ export default class EntryAbility extends UIAbility {
         target = ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT;
       }
       this.context.getApplicationContext().setColorMode(target);
+      // 自定义字号档位需在页面加载前生效；「跟随系统」不干预，由 configuration.json 驱动
+      FontScaleService.applyOnLaunch(this.context, settings.fontMode);
     } catch (err) {
-      hilog.warn(DOMAIN, TAG, 'apply appearance failed: %{public}s', (err as Error).message);
+      hilog.warn(DOMAIN, TAG, 'apply launch preferences failed: %{public}s', (err as Error).message);
     }
   }
 

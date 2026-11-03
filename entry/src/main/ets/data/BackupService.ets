@@ -363,12 +363,12 @@ export class BackupService {
         }
         const dueAt: number = row.dueAt ?? 0;
         const important: boolean = row.important === true;
-        await repo.insert(title, quadrant, dueAt, important, false);
+        await repo.insert(title, quadrant, dueAt, important);
         if (completed) {
           const all = await repo.listAll();
           for (let k = 0; k < all.length; k++) {
             if (all[k].title === title && all[k].quadrant === quadrant) {
-              await repo.setCompleted(all[k].id, true, false);
+              await repo.setCompleted(all[k].id, true);
               break;
             }
           }

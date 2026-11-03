@@ -13,6 +13,24 @@ export const MODE_SYSTEM: number = 0;
 export const MODE_LIGHT: number = 1;
 export const MODE_DARK: number = 2;
 
+/** 字体档位：0 跟随系统，1-4 为应用内固定比例（覆盖系统字号） */
+export const FONT_FOLLOW: number = 0;
+export const FONT_SMALL: number = 1;
+export const FONT_NORMAL: number = 2;
+export const FONT_LARGE: number = 3;
+export const FONT_XLARGE: number = 4;
+
+/** 档位 → 绝对缩放比；索引即档位值 */
+const FONT_RATIOS: number[] = [1, 0.9, 1, 1.15, 1.3];
+
+/** 档位对应比例；跟随系统时返回 1（实际值由系统配置决定） */
+export function fontRatioOf(mode: number): number {
+  if (mode < 0 || mode >= FONT_RATIOS.length) {
+    return 1;
+  }
+  return FONT_RATIOS[mode];
+}
+
 export class AppSettings {
   /** 新建任务默认落入的象限 */
   defaultQuadrant: number = 1;
@@ -24,6 +42,8 @@ export class AppSettings {
   showCompletedToday: boolean = true;
   /** 大卡片（6*4）显示的清单条数 */
   widgetLines: number = 3;
+  /** 字体档位：0 跟随系统 / 1 小 / 2 标准 / 3 大 / 4 特大 */
+  fontMode: number = FONT_FOLLOW;
 
   copy(): AppSettings {
     const next: AppSettings = new AppSettings();
@@ -32,6 +52,7 @@ export class AppSettings {
     next.colorMode = this.colorMode;
     next.showCompletedToday = this.showCompletedToday;
     next.widgetLines = this.widgetLines;
+    next.fontMode = this.fontMode;
     return next;
   }
 }
@@ -63,4 +84,12 @@ export const WIDGET_LINE_OPTIONS: SettingOption[] = [
   new SettingOption(2, '2 条'),
   new SettingOption(3, '3 条'),
   new SettingOption(5, '5 条')
+];
+
+export const FONT_MODE_OPTIONS: SettingOption[] = [
+  new SettingOption(FONT_FOLLOW, '跟随系统'),
+  new SettingOption(FONT_SMALL, '小'),
+  new SettingOption(FONT_NORMAL, '标准'),
+  new SettingOption(FONT_LARGE, '大'),
+  new SettingOption(FONT_XLARGE, '特大')
 ];
