@@ -1,5 +1,5 @@
 import { common } from '@kit.AbilityKit';
-import { AppSettings, FONT_FOLLOW, MAT_REGULAR, MODE_SYSTEM, SORT_CREATED } from '../model/AppSettings';
+import { AppSettings, FONT_FOLLOW, MODE_SYSTEM, SORT_CREATED } from '../model/AppSettings';
 import { PrefStore } from './PrefStore';
 
 const KEY_DEFAULT_QUADRANT: string = 'set_default_quadrant';
@@ -8,7 +8,6 @@ const KEY_COLOR_MODE: string = 'set_color_mode';
 const KEY_SHOW_DONE: string = 'set_show_completed_today';
 const KEY_WIDGET_LINES: string = 'set_widget_lines';
 const KEY_FONT_MODE: string = 'set_font_mode';
-const KEY_MATERIAL_LEVEL: string = 'set_material_level';
 
 /** 设置仓储：一次读入内存，改动即落盘并保持内存同步 */
 export class SettingsStore {
@@ -32,8 +31,6 @@ export class SettingsStore {
     next.widgetLines = lines >= 1 && lines <= 8 ? lines : 3;
     const fontMode: number = PrefStore.getNumber(KEY_FONT_MODE, FONT_FOLLOW);
     next.fontMode = fontMode >= FONT_FOLLOW && fontMode <= 4 ? fontMode : FONT_FOLLOW;
-    const materialLevel: number = PrefStore.getNumber(KEY_MATERIAL_LEVEL, MAT_REGULAR);
-    next.materialLevel = materialLevel >= 0 && materialLevel <= 5 ? materialLevel : MAT_REGULAR;
     SettingsStore.settings = next;
     SettingsStore.loaded = true;
   }
@@ -50,6 +47,5 @@ export class SettingsStore {
     await PrefStore.put(KEY_SHOW_DONE, next.showCompletedToday);
     await PrefStore.put(KEY_WIDGET_LINES, next.widgetLines);
     await PrefStore.put(KEY_FONT_MODE, next.fontMode);
-    await PrefStore.put(KEY_MATERIAL_LEVEL, next.materialLevel);
   }
 }

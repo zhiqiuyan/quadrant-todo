@@ -16,10 +16,6 @@
       {
         "name": "client_id",
         "value": ""
-      },
-      {
-        "name": "ohos.arkui.UIMaterial.state",
-        "value": "enable"
       }
     ],
     "requestPermissions": [

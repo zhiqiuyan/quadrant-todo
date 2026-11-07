@@ -30,8 +30,6 @@ export default class EntryAbility extends UIAbility {
         try {
           const win: window.Window = await windowStage.getMainWindow();
           await win.setWindowLayoutFullScreen(true);
-          // 状态栏背景透明，露出应用根背景；浅色 / 深色随 colorMode 自动切换，与主页面始终同色
-          await win.setWindowSystemBarProperties({ statusBarColor: '#00000000' });
         } catch (err2) {
           hilog.warn(DOMAIN, TAG, 'immersive layout failed: %{public}s', (err2 as Error).message);
         }
