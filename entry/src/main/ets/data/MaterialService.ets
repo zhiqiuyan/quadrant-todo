@@ -3,8 +3,8 @@
  *
  * 官方约束：组件级 systemMaterial 只在弹窗类组件、Slider/Toggle/Select、
  * Navigation 标题栏与底部悬浮 TabBar 上生效，普通 Column / Row 设置不生效。
- * 本应用的新建模块是「底部悬浮栏 + 非模态局部卡片」，二者都是普通容器，
- * 因此六档光感统一用自绘径向渐变、描边与阴影表达，不依赖弹窗材质。
+ * 本应用的新建模块是「底部 dock 栏 + 键盘上方填写小弹窗」，均为普通容器。
+ * 六档光感只作用于 dock 栏，用自绘径向渐变与阴影表达；填写弹窗与主界面保持纯色。
  * uiMaterial 在此仅用于设备算力探测，供设置页展示与低算力降级判断。
  */
 import { uiMaterial } from '@kit.ArkUI';

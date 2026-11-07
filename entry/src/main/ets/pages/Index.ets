@@ -26,7 +26,7 @@ import {
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.1.1';
+const APP_VERSION: string = '1.1.2';
 /** 协议版本：内容有实质变更时 +1，用户需重新确认 */
 const AGREEMENT_VERSION: number = 1;
 const KEY_AGREE_ACCEPTED: string = 'agree_accepted';
@@ -181,15 +181,14 @@ struct Index {
   @State createQuadrant: number = Q1;
   @State createDue: number = 0;
   @State createImportant: boolean = false;
-  @State createGlowX: number = 140;
-  @State createGlowY: number = 30;
-  private lastCreateGlowMove: number = 0;
+  /** 键盘高度（vp），填写小弹窗贴在键盘上沿 */
+  @State keyboardHeight: number = 0;
 
   aboutToAppear(): void {
     this.boot();
   }
 
-  /** 协议未确认前拦截返回键；局部卡片展开时返回键先收起卡片 */
+  /** 协议未确认前拦截返回键；填写弹窗展开时返回键先收起弹窗 */
   onBackPress(): boolean {
     if (!this.agreed) {
       return true;
@@ -199,6 +198,21 @@ struct Index {
       return true;
     }
     return false;
+  }
+
+  /** 监听键盘高度（px → vp），填写小弹窗据此贴在键盘上沿 */
+  private async bindKeyboard(): Promise<void> {
+    if (this.ctx === undefined) {
+      return;
+    }
+    try {
+      const win: window.Window = await window.getLastWindow(this.ctx);
+      win.on('keyboardHeightChange', (height: number) => {
+        this.keyboardHeight = height > 0 ? this.getUIContext().px2vp(height) : 0;
+      });
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'keyboard observer failed: %{public}s', (err as Error).message);
+    }
   }
 
   /* ==================== 数据 ==================== */
@@ -228,6 +242,7 @@ struct Index {
       await LocalCalService.init(context);
       this.refreshLocalCalState();
       this.computeInsets();
+      await this.bindKeyboard();
       await this.reload();
       this.ready = true;
       if (this.autoBackup && HuaweiAuthService.loggedIn()) {
@@ -535,7 +550,7 @@ struct Index {
     return result;
   }
 
-  /** 主界面氛围光晕色标：显式元组类型，满足 RadialGradientOptions.colors */
+  /** dock 栏光晕色标：显式元组类型，满足 RadialGradientOptions.colors */
   private glowStops(): [ResourceColor, number][] {
     return [['#60A5FA', 0], ['#00000000', 1]];
   }
@@ -721,7 +736,7 @@ struct Index {
 
   /* ==================== 操作 ==================== */
 
-  /** 统一新建入口：由局部卡片提交，写库后走既有的刷新链路 */
+  /** 统一新建入口：由填写弹窗提交，写库后走既有的刷新链路 */
   private createTask(title: string, quadrant: number, dueAt: number, important: boolean): void {
     TaskRepository.getInstance().insert(title, quadrant, dueAt, important)
       .then(() => {
@@ -734,7 +749,7 @@ struct Index {
 
   /* ==================== 悬浮栏 + 局部新建卡片 ==================== */
 
-  /** 悬浮栏左侧按钮：展开 / 收起局部卡片 */
+  /** dock 左侧按钮：展开 / 收起填写弹窗 */
   private toggleCreateCard(): void {
     if (this.createOpen) {
       this.closeCreateCard();
@@ -744,7 +759,7 @@ struct Index {
     this.createOpen = true;
   }
 
-  /** 悬浮栏右侧象限键：选中该象限并展开局部卡片 */
+  /** dock 右侧象限键：选中该象限并展开填写弹窗 */
   private selectCreateQuadrant(key: number): void {
     this.createQuadrant = key;
     this.createOpen = true;
@@ -775,6 +790,24 @@ struct Index {
 
   private cardShadow(): ShadowOptions {
     return { radius: 24, color: '#332563EB', offsetX: 0, offsetY: 8 };
+  }
+
+  /** 键盘弹起时贴键盘上沿；未弹起时贴在 dock 上方 */
+  private createCardBottom(): number {
+    if (this.keyboardHeight > 0) {
+      return this.keyboardHeight + 8;
+    }
+    return 82;
+  }
+
+  /** dock 阴影随光感档位增强，六档差异集中在悬浮栏 */
+  private dockShadow(): ShadowOptions {
+    return {
+      radius: 14 + this.settings.materialLevel * 3,
+      color: '#332563EB',
+      offsetX: 0,
+      offsetY: 6
+    };
   }
 
   private async toggle(item: TaskItem): Promise<void> {
@@ -1936,7 +1969,7 @@ struct Index {
                 .width('100%')
                 .margin({ top: 10 })
 
-                Text('沉浸光感作用于底部悬浮栏、局部新建卡片与主界面光晕；档位越高，光感越明显。关闭档位恢复纯色界面。')
+                Text('沉浸光感只作用于底部 dock 栏；档位越高，栏上的光晕越明显。主界面与填写界面保持纯色，关闭档位恢复无光感。')
                   .fontSize(10)
                   .fontColor($r('app.color.muted'))
                   .margin({ top: 8 })
@@ -2491,18 +2524,17 @@ struct Index {
       .width('100%')
       .padding({ left: 8, right: 8 })
     }
-    .width('92%')
-    .constraintSize({ maxWidth: 380 })
+    .width('calc(100% - 24vp)')
     .height(58)
     .backgroundColor($r('app.color.card'))
     .borderRadius(20)
     .border({ width: 0.5, color: $r('app.color.border') })
-    .shadow(this.cardShadow())
+    .shadow(this.dockShadow())
     .clip(true)
-    .margin({ right: 16, bottom: 16 })
+    .margin({ right: 12, bottom: 16 })
   }
 
-  /** 悬浮栏象限键：高亮当前象限，点击立即切换并展开局部卡片 */
+  /** dock 象限键：高亮当前象限，点击立即切换并展开填写小弹窗 */
   @Builder
   QuadrantKey(meta: QuadrantMeta) {
     Column() {
@@ -2530,61 +2562,47 @@ struct Index {
     })
   }
 
-  /** 非模态局部卡片：贴在悬浮栏上方，不遮罩主界面 */
+  /** 填写小弹窗：贴在键盘上沿，保持纯色；沉浸光感不作用于此 */
   @Builder
   CreateCard() {
-    Stack({ alignContent: Alignment.Top }) {
-      if (this.settings.materialLevel > MAT_OFF) {
-        Column()
-          .width('100%')
-          .height('100%')
-          .radialGradient({
-            center: [this.createGlowX, this.createGlowY],
-            radius: glowRadiusOf(this.settings.materialLevel),
-            colors: this.glowStops()
-          })
-          .opacity(glowOpacityOf(this.settings.materialLevel))
-          .hitTestBehavior(HitTestMode.None)
-      }
-
-      Column() {
-        Row() {
-          Column() {
-            Text('新建待办')
-              .fontSize(17)
-              .fontWeight(FontWeight.Bold)
-              .fontColor($r('app.color.fg'))
-            Text(`归入 ${quadrantMeta(this.createQuadrant).name} · 可在下方切换`)
-              .fontSize(10)
-              .fontColor($r('app.color.muted'))
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .margin({ top: 2 })
-          }
-          .alignItems(HorizontalAlign.Start)
-          .layoutWeight(1)
-
-          Text('✕')
-            .fontSize(15)
-            .fontColor($r('app.color.muted'))
-            .padding(8)
-            .onClick(() => {
-              this.closeCreateCard();
-            })
-        }
-        .width('100%')
-
-        TextInput({ placeholder: '要做什么？', text: this.createTitle })
-          .placeholderColor($r('app.color.muted'))
-          .placeholderFont({ size: 14 })
-          .fontSize(15)
+    Column() {
+      Row({ space: 6 }) {
+        Circle()
+          .width(7)
+          .height(7)
+          .fill(quadrantDot(this.createQuadrant))
+        Text(quadrantMeta(this.createQuadrant).name)
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.fg'))
-          .height(44)
-          .width('100%')
-          .borderRadius(14)
+        Text('· 下方 dock 切换')
+          .fontSize(10)
+          .fontColor($r('app.color.muted'))
+        Blank()
+        Text('✕')
+          .fontSize(14)
+          .fontColor($r('app.color.muted'))
+          .padding({ left: 8, right: 2, top: 2, bottom: 2 })
+          .onClick(() => {
+            this.closeCreateCard();
+          })
+      }
+      .width('100%')
+      .margin({ bottom: 8 })
+
+      Row({ space: 8 }) {
+        TextInput({ placeholder: '要做什么？', text: this.createTitle })
+          .id('createInput')
+          .defaultFocus(true)
+          .placeholderColor($r('app.color.muted'))
+          .placeholderFont({ size: 13 })
+          .fontSize(14)
+          .fontColor($r('app.color.fg'))
+          .height(40)
+          .layoutWeight(1)
+          .borderRadius(12)
           .padding({ left: 12, right: 12 })
           .backgroundColor($r('app.color.bg'))
-          .margin({ top: 12 })
           .onChange((value: string) => {
             this.createTitle = value;
           })
@@ -2592,44 +2610,16 @@ struct Index {
             this.commitCreate();
           })
 
-        Text('截止日期')
-          .fontSize(11)
-          .fontColor($r('app.color.muted'))
-          .margin({ top: 12, bottom: 6 })
-          .width('100%')
-
-        Flex({ wrap: FlexWrap.Wrap }) {
-          ForEach(DUE_OPTIONS, (opt: DueOption) => {
-            this.CreateDueChip(opt)
-          }, (opt: DueOption) => `cdue-${opt.offset}-${this.createDuePicked(opt.offset) ? 1 : 0}`)
-        }
-        .width('100%')
-
-        Row() {
-          Text('标记为重要')
-            .fontSize(12)
-            .fontColor($r('app.color.fg'))
-          Blank()
-          Toggle({ type: ToggleType.Switch, isOn: this.createImportant })
-            .selectedColor($r('app.color.accent'))
-            .onChange((isOn: boolean) => {
-              this.createImportant = isOn;
-            })
-        }
-        .width('100%')
-        .margin({ top: 8 })
-
         Button() {
-          Text('创建待办')
-            .fontSize(14)
+          Text('↑')
+            .fontSize(18)
             .fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.on_accent'))
         }
-        .width('100%')
-        .height(42)
+        .width(40)
+        .height(40)
         .backgroundColor($r('app.color.accent'))
-        .borderRadius(14)
-        .margin({ top: 10 })
+        .borderRadius(12)
         .opacity(this.createTitle.trim().length > 0 ? 1 : 0.5)
         .enabled(this.createTitle.trim().length > 0)
         .onClick(() => {
@@ -2637,43 +2627,43 @@ struct Index {
         })
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 14, bottom: 16 })
+
+      Row({ space: 5 }) {
+        ForEach(DUE_OPTIONS, (opt: DueOption) => {
+          this.CreateDueChip(opt)
+        }, (opt: DueOption) => `cdue-${opt.offset}-${this.createDuePicked(opt.offset) ? 1 : 0}`)
+
+        Blank()
+        Text(this.createImportant ? '● 重要' : '○ 重要')
+          .fontSize(10)
+          .fontColor(this.createImportant ? $r('app.color.on_accent') : $r('app.color.muted'))
+          .padding({ left: 9, right: 9, top: 5, bottom: 5 })
+          .backgroundColor(this.createImportant ? $r('app.color.accent') : $r('app.color.bg'))
+          .borderRadius(10)
+          .onClick(() => {
+            this.createImportant = !this.createImportant;
+          })
+      }
+      .width('100%')
+      .margin({ top: 8 })
     }
-    .width('92%')
-    .constraintSize({ maxWidth: 380 })
+    .width('calc(100% - 24vp)')
+    .padding({ left: 12, right: 12, top: 12, bottom: 12 })
     .backgroundColor($r('app.color.card'))
-    .borderRadius(22)
+    .borderRadius(18)
     .border({ width: 0.5, color: $r('app.color.border') })
     .shadow(this.cardShadow())
-    .clip(true)
-    .margin({ right: 16, bottom: 82 })
-    .onTouch((event: TouchEvent) => {
-      if (this.settings.materialLevel <= MAT_OFF || event.touches.length === 0) {
-        return;
-      }
-      const now: number = Date.now();
-      if (now - this.lastCreateGlowMove < 60) {
-        return;
-      }
-      this.lastCreateGlowMove = now;
-      const x: number = event.touches[0].x;
-      const y: number = event.touches[0].y;
-      this.getUIContext().animateTo({ duration: 140, curve: Curve.EaseOut }, () => {
-        this.createGlowX = x;
-        this.createGlowY = y;
-      });
-    })
+    .margin({ right: 12, bottom: this.createCardBottom() })
   }
 
   @Builder
   CreateDueChip(opt: DueOption) {
     Text(opt.label)
-      .fontSize(11)
+      .fontSize(10)
       .fontColor(this.createDuePicked(opt.offset) ? $r('app.color.on_accent') : $r('app.color.fg'))
-      .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+      .padding({ left: 9, right: 9, top: 5, bottom: 5 })
       .backgroundColor(this.createDuePicked(opt.offset) ? $r('app.color.accent') : $r('app.color.bg'))
-      .borderRadius(12)
-      .margin({ right: 6, bottom: 6 })
+      .borderRadius(10)
       .onClick(() => {
         this.createDue = opt.offset < 0 ? 0 : DateUtil.dayOffset(opt.offset);
       })
@@ -2681,26 +2671,7 @@ struct Index {
 
   build() {
     Stack({ alignContent: Alignment.BottomEnd }) {
-      // 底色单独一层，氛围光晕与内容分层叠加
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor($r('app.color.bg'))
-
-      // 沉浸光感：普通容器不支持组件级系统材质，悬浮栏、局部卡片与主界面统一用渐变光晕表达档位
-      if (this.settings.materialLevel > MAT_OFF) {
-        Column()
-          .width('100%')
-          .height('100%')
-          .radialGradient({
-            center: ['50%', '12%'],
-            radius: glowRadiusOf(this.settings.materialLevel),
-            colors: this.glowStops()
-          })
-          .opacity(glowOpacityOf(this.settings.materialLevel))
-          .hitTestBehavior(HitTestMode.None)
-      }
-
+      // 主页面为纯色背景，与透明状态栏同色；沉浸光感只作用于底部 dock 栏
       Column() {
         this.Header()
 
@@ -2721,7 +2692,7 @@ struct Index {
       .width('100%')
       .height('100%')
 
-      // 全应用唯一的「新建待办」模块：悬浮栏常驻，局部卡片按需展开
+      // 全应用唯一的「新建待办」模块：dock 常驻，键盘上方填写小弹窗按需展开
       if (this.ready && this.agreed && !this.showEditor && !this.showRuler &&
         !this.showDone && !this.showSettings) {
         if (this.createOpen) {
