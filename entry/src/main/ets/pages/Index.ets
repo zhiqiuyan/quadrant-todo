@@ -26,7 +26,7 @@ import {
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.1.4';
+const APP_VERSION: string = '1.1.5';
 /** 协议版本：内容有实质变更时 +1，用户需重新确认 */
 const AGREEMENT_VERSION: number = 1;
 const KEY_AGREE_ACCEPTED: string = 'agree_accepted';
@@ -43,7 +43,7 @@ const DOCK_PADDING: number = 8;
 const DOCK_HEIGHT: number = 60;
 const DOCK_RADIUS: number = 30;
 
-/** 填写小弹窗的截止日快捷选项；offset < 0 代表「不设截止日」 */
+/** 融合胶囊的截止日快捷选项；offset < 0 代表「不设截止日」 */
 class DueOption {
   label: string;
   offset: number;
@@ -200,22 +200,20 @@ struct Index {
 
   private ctx: common.UIAbilityContext | undefined = undefined;
 
-  /** 填写小弹窗状态（非模态）：由底部 dock 驱动，主界面始终可交互 */
+  /** 新建模块状态（非模态）：展开时 dock 与填写栏融为一个大胶囊，主界面始终可交互 */
   @State createOpen: boolean = false;
   @State createTitle: string = '';
   @State createQuadrant: number = Q1;
   @State createDue: number = 0;
   @State createImportant: boolean = false;
-  /** 键盘高度（vp），填写小弹窗贴在键盘上沿 */
+  /** 键盘高度（vp）：融合大胶囊底边据此贴在键盘上沿 */
   @State keyboardHeight: number = 0;
-  /** 填写卡片实测高度（vp）：键盘弹起时 dock 据此上移到卡片上方，避免被键盘遮挡 */
-  @State createCardHeight: number = 104;
 
   aboutToAppear(): void {
     this.boot();
   }
 
-  /** 协议未确认前拦截返回键；填写弹窗展开时返回键先收起弹窗 */
+  /** 协议未确认前拦截返回键；融合胶囊展开时返回键先收起 */
   onBackPress(): boolean {
     if (!this.agreed) {
       return true;
@@ -227,7 +225,7 @@ struct Index {
     return false;
   }
 
-  /** 监听键盘高度（px → vp），填写小弹窗据此贴在键盘上沿 */
+  /** 监听键盘高度（px → vp），融合大胶囊据此贴在键盘上沿 */
   private async bindKeyboard(): Promise<void> {
     if (this.ctx === undefined) {
       return;
@@ -763,7 +761,7 @@ struct Index {
 
   /* ==================== 操作 ==================== */
 
-  /** 统一新建入口：由填写弹窗提交，写库后走既有的刷新链路 */
+  /** 统一新建入口：由融合胶囊提交，写库后走既有的刷新链路 */
   private createTask(title: string, quadrant: number, dueAt: number, important: boolean): void {
     TaskRepository.getInstance().insert(title, quadrant, dueAt, important)
       .then(() => {
@@ -774,16 +772,16 @@ struct Index {
       });
   }
 
-  /* ==================== 圆形 dock + 贴键盘填写弹窗 ==================== */
+  /* ==================== 圆形 dock / 键盘态融合输入大胶囊 ==================== */
 
-  /** 卡片出现后主动聚焦输入框，确保键盘弹起、keyboardHeight 有值 */
+  /** 融合胶囊出现后主动聚焦输入框，确保键盘弹起、keyboardHeight 有值 */
   private focusCreateInput(): void {
     setTimeout(() => {
       focusControl.requestFocus('createInput');
     }, 60);
   }
 
-  /** dock 左侧按钮：展开 / 收起填写弹窗 */
+  /** dock 左侧按钮：展开 / 收起融合胶囊 */
   private toggleCreateCard(): void {
     if (this.createOpen) {
       this.closeCreateCard();
@@ -794,7 +792,7 @@ struct Index {
     this.focusCreateInput();
   }
 
-  /** dock 右侧象限键：选中该象限并展开填写弹窗 */
+  /** dock 右侧象限键：选中该象限并展开融合胶囊 */
   private selectCreateQuadrant(key: number): void {
     this.createQuadrant = key;
     this.createOpen = true;
@@ -824,36 +822,17 @@ struct Index {
     return this.createDue === DateUtil.dayOffset(offset);
   }
 
-  /** 贴键盘时阴影朝上且收窄，避免下投影在键盘上形成视觉缝隙 */
-  private cardShadow(): ShadowOptions {
+  /** dock 与融合胶囊共用：键盘弹起时贴键盘上沿（零间隙），否则贴屏幕底部 16vp */
+  private dockBottom(): number {
+    return this.keyboardHeight > 0 ? this.keyboardHeight : 16;
+  }
+
+  /** 融合胶囊贴键盘时阴影朝上且收窄，避免下投影在键盘上形成视觉缝隙 */
+  private mergedShadow(): ShadowOptions {
     if (this.keyboardHeight > 0) {
       return { radius: 12, color: '#1F2563EB', offsetX: 0, offsetY: -2 };
     }
     return { radius: 24, color: '#332563EB', offsetX: 0, offsetY: 8 };
-  }
-
-  /** 贴键盘时下沿改方角，卡片底边与键盘上沿严丝合缝 */
-  private createCardRadius(): BorderRadiuses {
-    if (this.keyboardHeight > 0) {
-      return { topLeft: 18, topRight: 18, bottomLeft: 0, bottomRight: 0 };
-    }
-    return { topLeft: 18, topRight: 18, bottomLeft: 18, bottomRight: 18 };
-  }
-
-  /** 键盘弹起时卡片底边 = 键盘高度（零间隙）；未弹起时贴在 dock 上方 6vp */
-  private createCardBottom(): number {
-    if (this.keyboardHeight > 0) {
-      return this.keyboardHeight;
-    }
-    return DOCK_HEIGHT + 16 + 6;
-  }
-
-  /** 键盘弹起时 dock 上移：卡片展开则贴其上方 4vp，卡片收起则直接贴键盘上沿 */
-  private dockBottom(): number {
-    if (this.keyboardHeight > 0) {
-      return this.keyboardHeight + (this.createOpen ? this.createCardHeight + 4 : 0);
-    }
-    return 16;
   }
 
   /** dock 阴影随光感档位增强，六档差异只集中在 dock 栏 */
@@ -2025,7 +2004,7 @@ struct Index {
                 .width('100%')
                 .margin({ top: 10 })
 
-                Text('沉浸光感只作用于底部 dock 栏；档位越高，栏上的光晕越明显。主界面与填写界面保持纯色，关闭档位恢复无光感。')
+                Text('沉浸光感作用于底部 dock，以及输入时与填写栏融合成的大胶囊；档位越高，胶囊上的光晕越明显。主界面保持纯色，关闭档位恢复无光感。')
                   .fontSize(10)
                   .fontColor($r('app.color.muted'))
                   .margin({ top: 8 })
@@ -2534,7 +2513,7 @@ struct Index {
     .height('100%')
   }
 
-  /** 底部常驻悬浮栏：五个 44vp 圆形大色块，圆角弧与圆形四角等距 8vp */
+  /** 收起态：底部常驻的小胶囊 dock，五个 44vp 圆形大色块，四角等距 8vp */
   @Builder
   FloatingBar() {
     Stack({ alignContent: Alignment.Center }) {
@@ -2551,38 +2530,7 @@ struct Index {
           .hitTestBehavior(HitTestMode.None)
       }
 
-      Row() {
-        // 左侧唯一「新建待办」：圆形大色块，图标与文字都在圆内
-        Column() {
-          Text(this.createOpen ? '−' : '＋')
-            .fontSize(19)
-            .fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.on_accent'))
-            .height(21)
-          Text(this.createOpen ? '收起' : '新建')
-            .fontSize(9)
-            .fontColor($r('app.color.on_accent'))
-        }
-        .width(DOCK_KEY_SIZE)
-        .height(DOCK_KEY_SIZE)
-        .justifyContent(FlexAlign.Center)
-        .backgroundColor($r('app.color.accent'))
-        .borderRadius(DOCK_KEY_SIZE / 2)
-        .onClick(() => {
-          this.toggleCreateCard();
-        })
-
-        Blank()
-
-        Row({ space: 6 }) {
-          ForEach(QUADRANTS, (meta: QuadrantMeta) => {
-            this.QuadrantKey(meta)
-          }, (meta: QuadrantMeta) => `bar-${meta.key}-${this.createQuadrant === meta.key ? 1 : 0}`)
-        }
-      }
-      .width('100%')
-      .height(DOCK_KEY_SIZE)
-      .padding({ left: DOCK_PADDING, right: DOCK_PADDING })
+      this.DockKeys()
     }
     .width('calc(100% - 24vp)')
     .height(DOCK_HEIGHT)
@@ -2592,6 +2540,43 @@ struct Index {
     .shadow(this.dockShadow())
     .clip(true)
     .margin({ right: 12, bottom: this.dockBottom() })
+  }
+
+  /** 五个圆形大色块：小 dock 与融合大胶囊共用同一行，保证两种形态完全一致 */
+  @Builder
+  DockKeys() {
+    Row() {
+      // 左侧唯一「新建待办」：圆形大色块，图标与文字都在圆内
+      Column() {
+        Text(this.createOpen ? '−' : '＋')
+          .fontSize(19)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.on_accent'))
+          .height(21)
+        Text(this.createOpen ? '收起' : '新建')
+          .fontSize(9)
+          .fontColor($r('app.color.on_accent'))
+      }
+      .width(DOCK_KEY_SIZE)
+      .height(DOCK_KEY_SIZE)
+      .justifyContent(FlexAlign.Center)
+      .backgroundColor($r('app.color.accent'))
+      .borderRadius(DOCK_KEY_SIZE / 2)
+      .onClick(() => {
+        this.toggleCreateCard();
+      })
+
+      Blank()
+
+      Row({ space: 6 }) {
+        ForEach(QUADRANTS, (meta: QuadrantMeta) => {
+          this.QuadrantKey(meta)
+        }, (meta: QuadrantMeta) => `bar-${meta.key}-${this.createQuadrant === meta.key ? 1 : 0}`)
+      }
+    }
+    .width('100%')
+    .height(DOCK_KEY_SIZE)
+    .padding({ left: DOCK_PADDING, right: DOCK_PADDING })
   }
 
   /** dock 象限键：44vp 实心圆形大色块，选中时切到饱和象限色并加白色外环 */
@@ -2615,105 +2600,151 @@ struct Index {
       })
   }
 
-  /** 填写小弹窗：输入区、快捷选项与键盘组成紧凑视觉组；保持纯色，光感不作用于此 */
+  /**
+   * 融合大胶囊：新建时 dock 与填写栏不再分离，而是合成同一个 30vp 圆角胶囊。
+   * 顶行是五个圆形大色块，底行是贴键盘的输入框；容器宽度、圆角、背景与 dock 完全一致。
+   * 底层同色衬底填平底部两个圆角，保证底边与键盘上沿零间隙、不留三角空隙。
+   */
   @Builder
-  CreateCard() {
-    Column() {
-      // 第一行：当前象限（最轻的辅助信息）
-      Row({ space: 6 }) {
-        Circle()
-          .width(7)
-          .height(7)
-          .fill(quadrantDot(this.createQuadrant))
-        Text(quadrantMeta(this.createQuadrant).name)
-          .fontSize(12)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.fg'))
-        Text('· dock 切换象限')
-          .fontSize(10)
-          .fontColor($r('app.color.muted'))
-        Blank()
-        Text('✕')
-          .fontSize(14)
-          .fontColor($r('app.color.muted'))
-          .padding({ left: 8, right: 2, top: 2, bottom: 2 })
-          .onClick(() => {
-            this.closeCreateCard();
-          })
-      }
-      .width('100%')
-      .margin({ bottom: 4 })
+  MergedDock() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      // 底层衬底：只露出胶囊底部两个圆角的空隙，使底边与键盘上沿严丝合缝
+      Column()
+        .width('100%')
+        .height(DOCK_RADIUS)
+        .backgroundColor($r('app.color.card'))
+        .hitTestBehavior(HitTestMode.None)
 
-      // 第二行：截止日与重要标记，紧贴输入区上方
-      Row({ space: 4 }) {
-        ForEach(DUE_OPTIONS, (opt: DueOption) => {
-          this.CreateDueChip(opt)
-        }, (opt: DueOption) => `cdue-${opt.offset}-${this.createDuePicked(opt.offset) ? 1 : 0}`)
-
-        Blank()
-        Text(this.createImportant ? '● 重要' : '○ 重要')
-          .fontSize(10)
-          .fontColor(this.createImportant ? $r('app.color.on_accent') : $r('app.color.muted'))
-          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-          .backgroundColor(this.createImportant ? $r('app.color.accent') : $r('app.color.bg'))
-          .borderRadius(10)
-          .onClick(() => {
-            this.createImportant = !this.createImportant;
-          })
-      }
-      .width('100%')
-      .margin({ bottom: 6 })
-
-      // 第三行：输入框 + 提交，置于卡片最底部，与键盘只隔 6vp 内边距
-      Row({ space: 6 }) {
-        TextInput({ placeholder: '要做什么？', text: this.createTitle })
-          .id('createInput')
-          .defaultFocus(true)
-          .placeholderColor($r('app.color.muted'))
-          .placeholderFont({ size: 13 })
-          .fontSize(14)
-          .fontColor($r('app.color.fg'))
-          .height(40)
-          .layoutWeight(1)
-          .borderRadius(12)
-          .padding({ left: 12, right: 12 })
-          .backgroundColor($r('app.color.bg'))
-          .onChange((value: string) => {
-            this.createTitle = value;
-          })
-          .onSubmit(() => {
-            this.commitCreate();
-          })
-
-        Button() {
-          Text('↑')
-            .fontSize(18)
-            .fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.on_accent'))
+      Stack({ alignContent: Alignment.Top }) {
+        // 融合后整个胶囊就是 dock 的放大形态，光感铺满容器，仍只作用于此
+        if (this.settings.materialLevel > MAT_OFF) {
+          Column()
+            .width('100%')
+            .height('100%')
+            .radialGradient({
+              center: ['20%', '0%'],
+              radius: glowRadiusOf(this.settings.materialLevel),
+              colors: this.glowStops()
+            })
+            .opacity(glowOpacityOf(this.settings.materialLevel))
+            .hitTestBehavior(HitTestMode.None)
         }
-        .width(40)
-        .height(40)
-        .backgroundColor($r('app.color.accent'))
-        .borderRadius(12)
-        .opacity(this.createTitle.trim().length > 0 ? 1 : 0.5)
-        .enabled(this.createTitle.trim().length > 0)
-        .onClick(() => {
-          this.commitCreate();
+
+        Column() {
+          this.DockKeys()
+          this.MergedMetaRow()
+          this.MergedOptionsRow()
+          this.MergedInputRow()
+        }
+        .width('100%')
+        .padding({
+          left: DOCK_PADDING,
+          right: DOCK_PADDING,
+          top: DOCK_PADDING,
+          bottom: 6
         })
       }
       .width('100%')
+      .backgroundColor($r('app.color.card'))
+      .borderRadius(DOCK_RADIUS)
+      .clip(true)
     }
     .width('calc(100% - 24vp)')
-    .padding({ left: 12, right: 12, top: 8, bottom: 6 })
-    .backgroundColor($r('app.color.card'))
-    .borderRadius(this.createCardRadius())
-    .border({ width: 0.5, color: $r('app.color.border') })
-    .shadow(this.cardShadow())
-    .margin({ right: 12, bottom: this.createCardBottom() })
-    .onAreaChange((_old: Area, newValue: Area) => {
-      // 实测高度供 dock 上移使用；字体跟随系统缩放后依然不会与卡片重叠
-      this.createCardHeight = newValue.height as number;
-    })
+    .shadow(this.mergedShadow())
+    .margin({ right: 12, bottom: this.dockBottom() })
+  }
+
+  /** 融合胶囊第二行：当前象限与收起按钮 */
+  @Builder
+  MergedMetaRow() {
+    Row({ space: 6 }) {
+      Circle()
+        .width(7)
+        .height(7)
+        .fill(quadrantDot(this.createQuadrant))
+      Text(quadrantMeta(this.createQuadrant).name)
+        .fontSize(11)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.fg'))
+      Text('· 上方切换象限')
+        .fontSize(10)
+        .fontColor($r('app.color.muted'))
+      Blank()
+      Text('✕')
+        .fontSize(14)
+        .fontColor($r('app.color.muted'))
+        .padding({ left: 8, right: 2, top: 2, bottom: 2 })
+        .onClick(() => {
+          this.closeCreateCard();
+        })
+    }
+    .width('100%')
+    .margin({ top: 6, bottom: 4 })
+  }
+
+  /** 融合胶囊第三行：截止日 chips 与重要标记 */
+  @Builder
+  MergedOptionsRow() {
+    Row({ space: 4 }) {
+      ForEach(DUE_OPTIONS, (opt: DueOption) => {
+        this.CreateDueChip(opt)
+      }, (opt: DueOption) => `cdue-${opt.offset}-${this.createDuePicked(opt.offset) ? 1 : 0}`)
+
+      Blank()
+      Text(this.createImportant ? '● 重要' : '○ 重要')
+        .fontSize(10)
+        .fontColor(this.createImportant ? $r('app.color.on_accent') : $r('app.color.muted'))
+        .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+        .backgroundColor(this.createImportant ? $r('app.color.accent') : $r('app.color.bg'))
+        .borderRadius(10)
+        .onClick(() => {
+          this.createImportant = !this.createImportant;
+        })
+    }
+    .width('100%')
+    .margin({ bottom: 6 })
+  }
+
+  /** 融合胶囊底行：输入框 + 提交，底内边距 6vp 就是到键盘的全部距离 */
+  @Builder
+  MergedInputRow() {
+    Row({ space: 6 }) {
+      TextInput({ placeholder: '要做什么？', text: this.createTitle })
+        .id('createInput')
+        .defaultFocus(true)
+        .placeholderColor($r('app.color.muted'))
+        .placeholderFont({ size: 13 })
+        .fontSize(14)
+        .fontColor($r('app.color.fg'))
+        .height(40)
+        .layoutWeight(1)
+        .borderRadius(12)
+        .padding({ left: 12, right: 12 })
+        .backgroundColor($r('app.color.bg'))
+        .onChange((value: string) => {
+          this.createTitle = value;
+        })
+        .onSubmit(() => {
+          this.commitCreate();
+        })
+
+      Button() {
+        Text('↑')
+          .fontSize(18)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.on_accent'))
+      }
+      .width(40)
+      .height(40)
+      .backgroundColor($r('app.color.accent'))
+      .borderRadius(12)
+      .opacity(this.createTitle.trim().length > 0 ? 1 : 0.5)
+      .enabled(this.createTitle.trim().length > 0)
+      .onClick(() => {
+        this.commitCreate();
+      })
+    }
+    .width('100%')
   }
 
   @Builder
@@ -2731,7 +2762,7 @@ struct Index {
 
   build() {
     Stack({ alignContent: Alignment.BottomEnd }) {
-      // 主页面为纯色背景，与透明状态栏同色；沉浸光感只作用于底部 dock 栏
+      // 主页面为纯色背景，与透明状态栏同色；沉浸光感只作用于 dock / 融合大胶囊
       Column() {
         this.Header()
 
@@ -2752,13 +2783,14 @@ struct Index {
       .width('100%')
       .height('100%')
 
-      // 全应用唯一的「新建待办」模块：圆形 dock 常驻，填写小弹窗紧贴键盘按需展开
+      // 全应用唯一的「新建待办」模块：收起时是小胶囊 dock，展开时融为一个贴键盘的大胶囊
       if (this.ready && this.agreed && !this.showEditor && !this.showRuler &&
         !this.showDone && !this.showSettings) {
         if (this.createOpen) {
-          this.CreateCard()
+          this.MergedDock()
+        } else {
+          this.FloatingBar()
         }
-        this.FloatingBar()
       }
 
       if (this.showEditor) {
