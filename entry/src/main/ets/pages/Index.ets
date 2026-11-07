@@ -2,7 +2,7 @@ import { common, ConfigurationConstant } from '@kit.AbilityKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
-import { QuadrantMeta, QUADRANTS, TaskItem, Q1 } from '../model/TaskItem';
+import { QuadrantMeta, QUADRANTS, TaskItem, Q1, quadrantMeta } from '../model/TaskItem';
 import { Account } from '../model/Account';
 import { dailyQuote, QuoteItem } from '../model/Quote';
 import {
@@ -20,18 +20,49 @@ import { CalSyncService, CalSyncConfig } from '../data/CalSyncService';
 import { LocalCalService, LocalCalResult } from '../data/LocalCalService';
 import { FontScaleService } from '../data/FontScaleService';
 import { DateUtil } from '../common/DateUtil';
-import { CreateTaskDialog } from './CreateTaskDialog';
 import {
-  deviceLevelLabel, dialogMaterialOf, glowOpacityOf, glowRadiusOf, immersiveSupported
+  deviceLevelLabel, glowOpacityOf, glowRadiusOf, immersiveSupported
 } from '../data/MaterialService';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.1.0';
+const APP_VERSION: string = '1.1.1';
 /** 协议版本：内容有实质变更时 +1，用户需重新确认 */
 const AGREEMENT_VERSION: number = 1;
 const KEY_AGREE_ACCEPTED: string = 'agree_accepted';
 const KEY_AGREE_VERSION: string = 'agree_version';
+
+/** 局部新建卡片的截止日快捷选项；offset < 0 代表「不设截止日」 */
+class DueOption {
+  label: string;
+  offset: number;
+
+  constructor(label: string, offset: number) {
+    this.label = label;
+    this.offset = offset;
+  }
+}
+
+const DUE_OPTIONS: DueOption[] = [
+  new DueOption('无', -1),
+  new DueOption('今天', 0),
+  new DueOption('明天', 1),
+  new DueOption('七天后', 7)
+];
+
+/** 悬浮栏象限键的色点 */
+function quadrantDot(key: number): Resource {
+  if (key === 2) {
+    return $r('app.color.q2_dot');
+  }
+  if (key === 3) {
+    return $r('app.color.q3_dot');
+  }
+  if (key === 4) {
+    return $r('app.color.q4_dot');
+  }
+  return $r('app.color.q1_dot');
+}
 
 
 /**
@@ -144,17 +175,30 @@ struct Index {
 
   private ctx: common.UIAbilityContext | undefined = undefined;
 
-  /** 全局唯一的「新建待办」弹窗控制器；沉浸光感档位变化时重建以应用新材质 */
-  private createDialog: CustomDialogController | undefined = undefined;
-  private createDialogLevel: number = -1;
+  /** 局部新建卡片（非模态）：由底部悬浮栏驱动，主界面始终可交互 */
+  @State createOpen: boolean = false;
+  @State createTitle: string = '';
+  @State createQuadrant: number = Q1;
+  @State createDue: number = 0;
+  @State createImportant: boolean = false;
+  @State createGlowX: number = 140;
+  @State createGlowY: number = 30;
+  private lastCreateGlowMove: number = 0;
 
   aboutToAppear(): void {
     this.boot();
   }
 
-  /** 协议未确认前拦截返回键，只能选择同意或退出 */
+  /** 协议未确认前拦截返回键；局部卡片展开时返回键先收起卡片 */
   onBackPress(): boolean {
-    return !this.agreed;
+    if (!this.agreed) {
+      return true;
+    }
+    if (this.createOpen) {
+      this.closeCreateCard();
+      return true;
+    }
+    return false;
   }
 
   /* ==================== 数据 ==================== */
@@ -496,10 +540,6 @@ struct Index {
     return [['#60A5FA', 0], ['#00000000', 1]];
   }
 
-  private fabShadow(): ShadowOptions {
-    return { radius: 18, color: '#332563EB', offsetX: 0, offsetY: 6 };
-  }
-
   /** 设置页展示设备算力等级与材质支持情况 */
   private materialCapabilityText(): string {
     const level: string = deviceLevelLabel();
@@ -681,7 +721,7 @@ struct Index {
 
   /* ==================== 操作 ==================== */
 
-  /** 统一新建入口：由 CreateTaskDialog 回调，写库后走既有的刷新链路 */
+  /** 统一新建入口：由局部卡片提交，写库后走既有的刷新链路 */
   private createTask(title: string, quadrant: number, dueAt: number, important: boolean): void {
     TaskRepository.getInstance().insert(title, quadrant, dueAt, important)
       .then(() => {
@@ -692,36 +732,49 @@ struct Index {
       });
   }
 
-  /**
-   * 打开全应用唯一的「新建待办」弹窗。
-   * 系统材质必须在 controller 构造时传入，因此档位变化后重建 controller。
-   */
-  private openCreateDialog(): void {
-    const level: number = this.settings.materialLevel;
-    if (this.createDialog === undefined || this.createDialogLevel !== level) {
-      this.createDialog = new CustomDialogController({
-        builder: CreateTaskDialog({
-          initialQuadrant: this.settings.defaultQuadrant,
-          materialLevel: level,
-          onSave: (title: string, quadrant: number, dueAt: number, important: boolean) => {
-            this.createTask(title, quadrant, dueAt, important);
-          }
-        }),
-        alignment: DialogAlignment.Bottom,
-        customStyle: true,
-        autoCancel: true,
-        offset: { dx: 0, dy: -12 },
-        cornerRadius: 28,
-        maskColor: $r('app.color.scrim'),
-        systemMaterial: dialogMaterialOf(level),
-        openAnimation: { duration: 320, curve: Curve.EaseOut },
-        closeAnimation: { duration: 220, curve: Curve.EaseIn }
-      });
-      this.createDialogLevel = level;
+  /* ==================== 悬浮栏 + 局部新建卡片 ==================== */
+
+  /** 悬浮栏左侧按钮：展开 / 收起局部卡片 */
+  private toggleCreateCard(): void {
+    if (this.createOpen) {
+      this.closeCreateCard();
+      return;
     }
-    if (this.createDialog !== undefined) {
-      this.createDialog.open();
+    this.createQuadrant = this.settings.defaultQuadrant;
+    this.createOpen = true;
+  }
+
+  /** 悬浮栏右侧象限键：选中该象限并展开局部卡片 */
+  private selectCreateQuadrant(key: number): void {
+    this.createQuadrant = key;
+    this.createOpen = true;
+  }
+
+  private closeCreateCard(): void {
+    this.createOpen = false;
+    this.createTitle = '';
+    this.createDue = 0;
+    this.createImportant = false;
+  }
+
+  private commitCreate(): void {
+    const value: string = this.createTitle.trim();
+    if (value.length === 0) {
+      return;
     }
+    this.createTask(value, this.createQuadrant, this.createDue, this.createImportant);
+    this.closeCreateCard();
+  }
+
+  private createDuePicked(offset: number): boolean {
+    if (offset < 0) {
+      return this.createDue === 0;
+    }
+    return this.createDue === DateUtil.dayOffset(offset);
+  }
+
+  private cardShadow(): ShadowOptions {
+    return { radius: 24, color: '#332563EB', offsetX: 0, offsetY: 8 };
   }
 
   private async toggle(item: TaskItem): Promise<void> {
@@ -1074,8 +1127,8 @@ struct Index {
     }
     .width('100%')
     .layoutWeight(1)
-    // 底部留出悬浮「新建待办」入口的空间，避免遮住第四象限的任务
-    .padding({ left: 12, right: 12, bottom: 68 })
+    // 底部留出悬浮栏（58 + 16 边距）的空间，避免遮住第四象限的任务
+    .padding({ left: 12, right: 12, bottom: 84 })
   }
 
   @Builder
@@ -1883,7 +1936,7 @@ struct Index {
                 .width('100%')
                 .margin({ top: 10 })
 
-                Text('系统材质作用于「新建待办」弹窗与开关控件；档位越高，材质越厚、界面光晕越明显。关闭档位恢复纯色界面。')
+                Text('沉浸光感作用于底部悬浮栏、局部新建卡片与主界面光晕；档位越高，光感越明显。关闭档位恢复纯色界面。')
                   .fontSize(10)
                   .fontColor($r('app.color.muted'))
                   .margin({ top: 8 })
@@ -2392,6 +2445,240 @@ struct Index {
     .height('100%')
   }
 
+  /** 底部常驻悬浮栏：左侧唯一「新建待办」，右侧四个象限选择键 */
+  @Builder
+  FloatingBar() {
+    Stack({ alignContent: Alignment.Center }) {
+      if (this.settings.materialLevel > MAT_OFF) {
+        Column()
+          .width('100%')
+          .height('100%')
+          .radialGradient({
+            center: ['20%', '0%'],
+            radius: glowRadiusOf(this.settings.materialLevel),
+            colors: this.glowStops()
+          })
+          .opacity(glowOpacityOf(this.settings.materialLevel))
+          .hitTestBehavior(HitTestMode.None)
+      }
+
+      Row({ space: 6 }) {
+        Row({ space: 6 }) {
+          Text(this.createOpen ? '−' : '＋')
+            .fontSize(19)
+            .fontColor($r('app.color.on_accent'))
+          Text('新建待办')
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.on_accent'))
+        }
+        .height(42)
+        .padding({ left: 14, right: 14 })
+        .backgroundColor($r('app.color.accent'))
+        .borderRadius(21)
+        .onClick(() => {
+          this.toggleCreateCard();
+        })
+
+        Row({ space: 5 }) {
+          ForEach(QUADRANTS, (meta: QuadrantMeta) => {
+            this.QuadrantKey(meta)
+          }, (meta: QuadrantMeta) => `bar-${meta.key}-${this.createQuadrant === meta.key ? 1 : 0}`)
+        }
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.End)
+      }
+      .width('100%')
+      .padding({ left: 8, right: 8 })
+    }
+    .width('92%')
+    .constraintSize({ maxWidth: 380 })
+    .height(58)
+    .backgroundColor($r('app.color.card'))
+    .borderRadius(20)
+    .border({ width: 0.5, color: $r('app.color.border') })
+    .shadow(this.cardShadow())
+    .clip(true)
+    .margin({ right: 16, bottom: 16 })
+  }
+
+  /** 悬浮栏象限键：高亮当前象限，点击立即切换并展开局部卡片 */
+  @Builder
+  QuadrantKey(meta: QuadrantMeta) {
+    Column() {
+      Text(`${meta.key}`)
+        .fontSize(14)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.createQuadrant === meta.key ? $r('app.color.on_accent') : $r('app.color.fg'))
+      Circle()
+        .width(5)
+        .height(5)
+        .fill(quadrantDot(meta.key))
+        .margin({ top: 2 })
+    }
+    .width(38)
+    .height(42)
+    .justifyContent(FlexAlign.Center)
+    .backgroundColor(this.createQuadrant === meta.key ? $r('app.color.accent') : $r('app.color.bg'))
+    .borderRadius(14)
+    .border({
+      width: this.createQuadrant === meta.key ? 0 : 0.5,
+      color: $r('app.color.border')
+    })
+    .onClick(() => {
+      this.selectCreateQuadrant(meta.key);
+    })
+  }
+
+  /** 非模态局部卡片：贴在悬浮栏上方，不遮罩主界面 */
+  @Builder
+  CreateCard() {
+    Stack({ alignContent: Alignment.Top }) {
+      if (this.settings.materialLevel > MAT_OFF) {
+        Column()
+          .width('100%')
+          .height('100%')
+          .radialGradient({
+            center: [this.createGlowX, this.createGlowY],
+            radius: glowRadiusOf(this.settings.materialLevel),
+            colors: this.glowStops()
+          })
+          .opacity(glowOpacityOf(this.settings.materialLevel))
+          .hitTestBehavior(HitTestMode.None)
+      }
+
+      Column() {
+        Row() {
+          Column() {
+            Text('新建待办')
+              .fontSize(17)
+              .fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.fg'))
+            Text(`归入 ${quadrantMeta(this.createQuadrant).name} · 可在下方切换`)
+              .fontSize(10)
+              .fontColor($r('app.color.muted'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .margin({ top: 2 })
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+
+          Text('✕')
+            .fontSize(15)
+            .fontColor($r('app.color.muted'))
+            .padding(8)
+            .onClick(() => {
+              this.closeCreateCard();
+            })
+        }
+        .width('100%')
+
+        TextInput({ placeholder: '要做什么？', text: this.createTitle })
+          .placeholderColor($r('app.color.muted'))
+          .placeholderFont({ size: 14 })
+          .fontSize(15)
+          .fontColor($r('app.color.fg'))
+          .height(44)
+          .width('100%')
+          .borderRadius(14)
+          .padding({ left: 12, right: 12 })
+          .backgroundColor($r('app.color.bg'))
+          .margin({ top: 12 })
+          .onChange((value: string) => {
+            this.createTitle = value;
+          })
+          .onSubmit(() => {
+            this.commitCreate();
+          })
+
+        Text('截止日期')
+          .fontSize(11)
+          .fontColor($r('app.color.muted'))
+          .margin({ top: 12, bottom: 6 })
+          .width('100%')
+
+        Flex({ wrap: FlexWrap.Wrap }) {
+          ForEach(DUE_OPTIONS, (opt: DueOption) => {
+            this.CreateDueChip(opt)
+          }, (opt: DueOption) => `cdue-${opt.offset}-${this.createDuePicked(opt.offset) ? 1 : 0}`)
+        }
+        .width('100%')
+
+        Row() {
+          Text('标记为重要')
+            .fontSize(12)
+            .fontColor($r('app.color.fg'))
+          Blank()
+          Toggle({ type: ToggleType.Switch, isOn: this.createImportant })
+            .selectedColor($r('app.color.accent'))
+            .onChange((isOn: boolean) => {
+              this.createImportant = isOn;
+            })
+        }
+        .width('100%')
+        .margin({ top: 8 })
+
+        Button() {
+          Text('创建待办')
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.on_accent'))
+        }
+        .width('100%')
+        .height(42)
+        .backgroundColor($r('app.color.accent'))
+        .borderRadius(14)
+        .margin({ top: 10 })
+        .opacity(this.createTitle.trim().length > 0 ? 1 : 0.5)
+        .enabled(this.createTitle.trim().length > 0)
+        .onClick(() => {
+          this.commitCreate();
+        })
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 14, bottom: 16 })
+    }
+    .width('92%')
+    .constraintSize({ maxWidth: 380 })
+    .backgroundColor($r('app.color.card'))
+    .borderRadius(22)
+    .border({ width: 0.5, color: $r('app.color.border') })
+    .shadow(this.cardShadow())
+    .clip(true)
+    .margin({ right: 16, bottom: 82 })
+    .onTouch((event: TouchEvent) => {
+      if (this.settings.materialLevel <= MAT_OFF || event.touches.length === 0) {
+        return;
+      }
+      const now: number = Date.now();
+      if (now - this.lastCreateGlowMove < 60) {
+        return;
+      }
+      this.lastCreateGlowMove = now;
+      const x: number = event.touches[0].x;
+      const y: number = event.touches[0].y;
+      this.getUIContext().animateTo({ duration: 140, curve: Curve.EaseOut }, () => {
+        this.createGlowX = x;
+        this.createGlowY = y;
+      });
+    })
+  }
+
+  @Builder
+  CreateDueChip(opt: DueOption) {
+    Text(opt.label)
+      .fontSize(11)
+      .fontColor(this.createDuePicked(opt.offset) ? $r('app.color.on_accent') : $r('app.color.fg'))
+      .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+      .backgroundColor(this.createDuePicked(opt.offset) ? $r('app.color.accent') : $r('app.color.bg'))
+      .borderRadius(12)
+      .margin({ right: 6, bottom: 6 })
+      .onClick(() => {
+        this.createDue = opt.offset < 0 ? 0 : DateUtil.dayOffset(opt.offset);
+      })
+  }
+
   build() {
     Stack({ alignContent: Alignment.BottomEnd }) {
       // 底色单独一层，氛围光晕与内容分层叠加
@@ -2400,7 +2687,7 @@ struct Index {
         .height('100%')
         .backgroundColor($r('app.color.bg'))
 
-      // 沉浸光感：系统材质只作用于弹窗类组件，主界面用渐变光晕表达同一档位
+      // 沉浸光感：普通容器不支持组件级系统材质，悬浮栏、局部卡片与主界面统一用渐变光晕表达档位
       if (this.settings.materialLevel > MAT_OFF) {
         Column()
           .width('100%')
@@ -2434,27 +2721,13 @@ struct Index {
       .width('100%')
       .height('100%')
 
-      // 全应用唯一的「新建待办」入口
+      // 全应用唯一的「新建待办」模块：悬浮栏常驻，局部卡片按需展开
       if (this.ready && this.agreed && !this.showEditor && !this.showRuler &&
         !this.showDone && !this.showSettings) {
-        Row({ space: 6 }) {
-          Text('＋')
-            .fontSize(20)
-            .fontColor($r('app.color.on_accent'))
-          Text('新建待办')
-            .fontSize(14)
-            .fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.on_accent'))
+        if (this.createOpen) {
+          this.CreateCard()
         }
-        .height(48)
-        .padding({ left: 18, right: 20 })
-        .backgroundColor($r('app.color.accent'))
-        .borderRadius(24)
-        .shadow(this.fabShadow())
-        .margin({ right: 18, bottom: 20 })
-        .onClick(() => {
-          this.openCreateDialog();
-        })
+        this.FloatingBar()
       }
 
       if (this.showEditor) {
