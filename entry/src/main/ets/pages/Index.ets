@@ -1,7 +1,7 @@
 import { common, ConfigurationConstant } from '@kit.AbilityKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { window } from '@kit.ArkUI';
+import { window, KeyboardAvoidMode } from '@kit.ArkUI';
 import { QuadrantMeta, QUADRANTS, TaskItem, Q1, quadrantMeta } from '../model/TaskItem';
 import { Account } from '../model/Account';
 import { dailyQuote, QuoteItem } from '../model/Quote';
@@ -26,7 +26,7 @@ import {
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.1.3';
+const APP_VERSION: string = '1.1.4';
 /** 协议版本：内容有实质变更时 +1，用户需重新确认 */
 const AGREEMENT_VERSION: number = 1;
 const KEY_AGREE_ACCEPTED: string = 'agree_accepted';
@@ -209,7 +209,7 @@ struct Index {
   /** 键盘高度（vp），填写小弹窗贴在键盘上沿 */
   @State keyboardHeight: number = 0;
   /** 填写卡片实测高度（vp）：键盘弹起时 dock 据此上移到卡片上方，避免被键盘遮挡 */
-  @State createCardHeight: number = 120;
+  @State createCardHeight: number = 104;
 
   aboutToAppear(): void {
     this.boot();
@@ -848,10 +848,10 @@ struct Index {
     return DOCK_HEIGHT + 16 + 6;
   }
 
-  /** 键盘弹起时 dock 上移：卡片展开则贴其上方，卡片收起则直接贴键盘上沿 */
+  /** 键盘弹起时 dock 上移：卡片展开则贴其上方 4vp，卡片收起则直接贴键盘上沿 */
   private dockBottom(): number {
     if (this.keyboardHeight > 0) {
-      return this.keyboardHeight + (this.createOpen ? this.createCardHeight + 6 : 0);
+      return this.keyboardHeight + (this.createOpen ? this.createCardHeight + 4 : 0);
     }
     return 16;
   }
@@ -2615,10 +2615,11 @@ struct Index {
       })
   }
 
-  /** 填写小弹窗：贴在键盘上沿，保持纯色；沉浸光感不作用于此 */
+  /** 填写小弹窗：输入区、快捷选项与键盘组成紧凑视觉组；保持纯色，光感不作用于此 */
   @Builder
   CreateCard() {
     Column() {
+      // 第一行：当前象限（最轻的辅助信息）
       Row({ space: 6 }) {
         Circle()
           .width(7)
@@ -2641,9 +2642,30 @@ struct Index {
           })
       }
       .width('100%')
-      .margin({ bottom: 8 })
+      .margin({ bottom: 4 })
 
-      Row({ space: 8 }) {
+      // 第二行：截止日与重要标记，紧贴输入区上方
+      Row({ space: 4 }) {
+        ForEach(DUE_OPTIONS, (opt: DueOption) => {
+          this.CreateDueChip(opt)
+        }, (opt: DueOption) => `cdue-${opt.offset}-${this.createDuePicked(opt.offset) ? 1 : 0}`)
+
+        Blank()
+        Text(this.createImportant ? '● 重要' : '○ 重要')
+          .fontSize(10)
+          .fontColor(this.createImportant ? $r('app.color.on_accent') : $r('app.color.muted'))
+          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .backgroundColor(this.createImportant ? $r('app.color.accent') : $r('app.color.bg'))
+          .borderRadius(10)
+          .onClick(() => {
+            this.createImportant = !this.createImportant;
+          })
+      }
+      .width('100%')
+      .margin({ bottom: 6 })
+
+      // 第三行：输入框 + 提交，置于卡片最底部，与键盘只隔 6vp 内边距
+      Row({ space: 6 }) {
         TextInput({ placeholder: '要做什么？', text: this.createTitle })
           .id('createInput')
           .defaultFocus(true)
@@ -2680,28 +2702,9 @@ struct Index {
         })
       }
       .width('100%')
-
-      Row({ space: 5 }) {
-        ForEach(DUE_OPTIONS, (opt: DueOption) => {
-          this.CreateDueChip(opt)
-        }, (opt: DueOption) => `cdue-${opt.offset}-${this.createDuePicked(opt.offset) ? 1 : 0}`)
-
-        Blank()
-        Text(this.createImportant ? '● 重要' : '○ 重要')
-          .fontSize(10)
-          .fontColor(this.createImportant ? $r('app.color.on_accent') : $r('app.color.muted'))
-          .padding({ left: 9, right: 9, top: 5, bottom: 5 })
-          .backgroundColor(this.createImportant ? $r('app.color.accent') : $r('app.color.bg'))
-          .borderRadius(10)
-          .onClick(() => {
-            this.createImportant = !this.createImportant;
-          })
-      }
-      .width('100%')
-      .margin({ top: 8 })
     }
     .width('calc(100% - 24vp)')
-    .padding({ left: 12, right: 12, top: 12, bottom: 12 })
+    .padding({ left: 12, right: 12, top: 8, bottom: 6 })
     .backgroundColor($r('app.color.card'))
     .borderRadius(this.createCardRadius())
     .border({ width: 0.5, color: $r('app.color.border') })
@@ -2718,7 +2721,7 @@ struct Index {
     Text(opt.label)
       .fontSize(10)
       .fontColor(this.createDuePicked(opt.offset) ? $r('app.color.on_accent') : $r('app.color.fg'))
-      .padding({ left: 9, right: 9, top: 5, bottom: 5 })
+      .padding({ left: 8, right: 8, top: 4, bottom: 4 })
       .backgroundColor(this.createDuePicked(opt.offset) ? $r('app.color.accent') : $r('app.color.bg'))
       .borderRadius(10)
       .onClick(() => {
@@ -2782,6 +2785,12 @@ struct Index {
     .height('100%')
     .backgroundColor($r('app.color.bg'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-    .padding({ top: this.topInset, bottom: this.bottomInset })
+    // 键盘弹起时键盘本身已占据底部，不能再叠加导航条避让，否则卡片会浮在键盘上方
+    .padding({ top: this.topInset, bottom: this.keyboardHeight > 0 ? 0 : this.bottomInset })
+    .onAppear(() => {
+      // ArkUI 默认是 OFFSET（键盘弹起时整页上移）。页面已按 keyboardHeight 手动定位卡片，
+      // 若保留默认避让会形成二次位移，卡片与键盘之间出现大片空白，因此显式关闭页面级避让。
+      this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
+    })
   }
 }
