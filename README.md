@@ -5,14 +5,14 @@
 灵感来自 [jailedxiu/quadrant-todo](https://github.com/jailedxiu/quadrant-todo)（网页版象限待办）。本仓库是原生鸿蒙实现：任务默认只存在本机数据库，不依赖任何账号体系；需要跨设备或与系统日历联动时，再按需开启对应能力。
 
 - 应用包名：`com.quadrant.todo`
-- 版本：**1.0（正式版）**
-- 技术要求：HarmonyOS 6.0（API 20）及以上
+- 版本：**1.1.0**（版本记录见 [CHANGELOG.md](CHANGELOG.md)）
+- 技术要求：HarmonyOS 7.0（API 26）及以上（沉浸光感为 API 26 能力）
 
 ## 功能一览
 
 | 能力 | 说明 |
 |---|---|
-| 四象限看板 | 2×2 网格，按「重要 / 紧急」两维判定，每格独立快速输入框 |
+| 四象限看板 | 2×2 网格，按「重要 / 紧急」两维判定，全应用统一一个「新建待办」入口弹窗 |
 | 任务编辑 | 底部面板修改标题、象限、截止日、重要标记，改象限无需复制删除 |
 | 完成与历史 | 勾选圈切换完成状态，「已完成」抽屉可恢复或删除 |
 | 归类说明 | 内置四象限判定尺子，说明每格的处理策略 |
@@ -24,6 +24,7 @@
 | 系统日历（可选） | Calendar Kit 把带截止日且未完成的任务写成全天事件，对账式同步 |
 | 日历订阅（可选） | 生成 ICS 推送到 Git 仓库，iPhone / Google 日历可订阅同一份数据 |
 | 字号 | 跟随系统字体大小（上限 1.75×），也可在应用内指定档位 |
+| 沉浸光感 | HarmonyOS 7 系统材质，六档可选；弹窗光随指动，主界面同步氛围光晕 |
 | 外观 | 跟随系统 / 浅色 / 深色，启动前应用以避免闪烁 |
 | 用户协议 | 首次启动全屏展示，同意后进入，不同意直接退出 |
 | 设置页 | 系统设置风格的单页分组卡片，「关于」默认折叠 |
@@ -81,6 +82,23 @@ iPhone「设置 → 日历 → 账户 → 添加订阅日历」、Google 日历�
 
 > **已知约束**：`ApplicationContext.setFontSizeScale` 一旦被调用，应用字体即不再跟随系统（官方行为）。因此实现上「跟随系统」档位绝不调用该接口；在应用内选了自定义档位后，切回「跟随系统」会立即对齐当前系统比例，但要完全恢复实时跟随需要重新打开一次应用。
 
+## 统一新建入口与沉浸光感
+
+**一个入口**：主界面右下角的「＋ 新建待办」是唯一的创建入口，四个象限格子只负责展示，不再各自带输入框。弹窗内一次完成标题、象限（2×2 点选，预选设置里的默认象限）、截止日（无 / 今天 / 明天 / 七天后）、重要标记，回车或「创建待办」即入库；编辑已有任务仍走底部面板。
+
+**沉浸光感**基于 HarmonyOS 7（API 26）的 ArkUI 沉浸式系统材质。应用级开关写在 `entry/src/main/module.json5` 的 `metadata`（`ohos.arkui.UIMaterial.state = enable`），弹窗材质通过 `CustomDialogControllerOptions.systemMaterial` 传入，设置 → 通用 →「沉浸光感」提供六档：
+
+| 档位 | 系统材质 | 适用取向 |
+|---|---|---|
+| 关闭 | `Material.empty` | 纯色界面，最省电 |
+| 极薄 | `ULTRA_THIN` | 高透明 |
+| 轻薄 | `THIN` | 较强透明 |
+| 标准（默认） | `REGULAR` | 常规厚度 |
+| 浓郁 | `THICK` | 强模糊 |
+| 极致 | `ULTRA_THICK` | 最强模糊，重点弹层 |
+
+档位同时控制交互形变、触点光感与界面氛围光晕强度。官方约束需要说明：系统材质只在弹窗类组件、Slider / Toggle / Select、Navigation 标题栏与底部悬浮 TabBar 上生效，普通 `Column` / `Row` 设置不生效，因此主界面光晕用渐变层独立实现。设备算力等级（`getGlobalMaterialLevel`）由系统决定，低算力设备不支持 `ImmersiveMaterial` 时自动回退为纯色，设置页会显示当前设备能力。
+
 ## 华为账号与云备份
 
 设置面板的「华为账号」「云备份」两个区块：华为账号走 Account Kit 授权，云备份走云基础服务的云存储。
@@ -114,7 +132,7 @@ quadrant-todo-harmony/
 │   ├── app.json5                                  # 应用配置（含 configuration 指向字体配置）
 │   └── resources/base/profile/configuration.json  # 字号跟随系统声明
 ├── entry/src/main/
-│   ├── module.json5                               # Ability / Form 扩展 / 权限
+│   ├── module.json5                               # Ability / Form 扩展 / 权限 / 沉浸光感 metadata
 │   ├── resources/base/profile/
 │   │   ├── main_pages.json                        # 页面路由
 │   │   └── form_config.json                       # 卡片声明（4*4、6*4）
@@ -122,6 +140,7 @@ quadrant-todo-harmony/
 │       ├── entryability/EntryAbility.ets           # 入口：启动前应用外观与字号
 │       ├── entryformability/EntryFormAbility.ets   # 卡片提供者
 │       ├── pages/Index.ets                         # 主界面 + 设置 + 协议 + 各抽屉面板
+│       ├── pages/CreateTaskDialog.ets              # 统一「新建待办」弹窗（系统材质 + 光随指动）
 │       ├── widget/WidgetData.ets                   # 卡片数据构建（与主界面同仓储）
 │       ├── widget/pages/Widget4x4.ets              # 4*4 看板卡片
 │       ├── widget/pages/Widget6x4.ets              # 6*4 宽幅卡片
@@ -140,6 +159,7 @@ quadrant-todo-harmony/
 │       ├── data/LocalCalService.ets                # 系统日历对账式同步
 │       ├── data/CalSyncService.ets                 # ICS 生成与仓库推送
 │       ├── data/FontScaleService.ets               # 字号档位与系统比例读取
+│       ├── data/MaterialService.ets                # 沉浸光感档位、材质构造与设备能力查询
 │       ├── data/HttpUtil.ets                       # 轻量 HTTP 封装
 │       └── common/DateUtil.ets                     # 日期工具（逾期 / 今天 / 明天）
 ├── tools/gen_icon.py                               # 图标生成脚本（纯标准库）
@@ -151,7 +171,7 @@ quadrant-todo-harmony/
 
 ### 方式一：DevEco Studio（推荐，可装真机）
 
-1. 用 DevEco Studio 打开本目录（6.0 及以上）；
+1. 用 DevEco Studio 打开本目录（26.0.0 及以上，需 API 26 SDK）；
 2. 等待 hvigor 同步完成；
 3. 连接真机或启动模拟器，Run；
 4. 真机运行需要签名：`File → Project Structure → Signing Configs → Automatically generate signature`。
@@ -189,7 +209,7 @@ quadrant-todo-harmony/
 ## 设计说明
 
 - **配色**：四格底色 `q1~q4`、强调蓝 `accent`、危险红 `danger`，浅色 / 深色两套资源，通过 `$r('app.color.*')` 引用。
-- **交互**：卡片单击进编辑、长按删确认；四格输入框回车或「＋」快速入库；编辑、归类说明、已完成均为底部抽屉。
+- **交互**：卡片单击进编辑、长按删确认；新建统一走右下角悬浮入口与底部弹窗；编辑、归类说明、已完成均为底部抽屉。
 - **数据**：本地 RDB 表 `task`，`account_id` 做账号隔离，`completed` 标记完成（不物理删除，便于统计「今日完成」）。
 - **卡片与界面同源**：`WidgetData.build()` 与主界面走同一个 `TaskRepository`，卡片只读不写，避免两套逻辑漂移。
 - **设置即时生效**：外观走 `setColorMode`、字号走 `setFontSizeScale`，都在 `loadContent` 之前应用，避免启动闪烁与字号跳变。
@@ -200,6 +220,7 @@ quadrant-todo-harmony/
 - `getCalendar()` 若无默认本地日历账户会抛错，届时以提示呈现而非静默失败。
 - 华为账号登录受签名约束，见上文「签名兼容边界」。
 - 大字号（1.75×）下的极端排版（四象限格内多条任务）尚未逐档真机验证。
+- 沉浸光感的系统材质效果与动态弹窗控制器尚未在真机验证；低算力设备按系统能力自动降级。
 
 ## 后续路线（可选）
 

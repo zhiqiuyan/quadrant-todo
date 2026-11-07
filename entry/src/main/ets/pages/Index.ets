@@ -6,8 +6,8 @@ import { QuadrantMeta, QUADRANTS, TaskItem, Q1 } from '../model/TaskItem';
 import { Account } from '../model/Account';
 import { dailyQuote, QuoteItem } from '../model/Quote';
 import {
-  AppSettings, COLOR_MODE_OPTIONS, FONT_FOLLOW, FONT_MODE_OPTIONS, fontRatioOf, MODE_DARK, MODE_LIGHT, MODE_SYSTEM,
-  SettingOption, SORT_OPTIONS, WIDGET_LINE_OPTIONS
+  AppSettings, COLOR_MODE_OPTIONS, FONT_FOLLOW, FONT_MODE_OPTIONS, fontRatioOf, MAT_OFF, MATERIAL_OPTIONS,
+  MODE_DARK, MODE_LIGHT, MODE_SYSTEM, SettingOption, SORT_OPTIONS, WIDGET_LINE_OPTIONS
 } from '../model/AppSettings';
 import { TaskRepository } from '../data/TaskRepository';
 import { AccountStore } from '../data/AccountStore';
@@ -20,10 +20,14 @@ import { CalSyncService, CalSyncConfig } from '../data/CalSyncService';
 import { LocalCalService, LocalCalResult } from '../data/LocalCalService';
 import { FontScaleService } from '../data/FontScaleService';
 import { DateUtil } from '../common/DateUtil';
+import { CreateTaskDialog } from './CreateTaskDialog';
+import {
+  deviceLevelLabel, dialogMaterialOf, glowOpacityOf, glowRadiusOf, immersiveSupported
+} from '../data/MaterialService';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'QuadrantTodo';
-const APP_VERSION: string = '1.0.0';
+const APP_VERSION: string = '1.1.0';
 /** 协议版本：内容有实质变更时 +1，用户需重新确认 */
 const AGREEMENT_VERSION: number = 1;
 const KEY_AGREE_ACCEPTED: string = 'agree_accepted';
@@ -104,12 +108,6 @@ struct Index {
   @State showDone: boolean = false;
   @State doneTasks: TaskItem[] = [];
 
-  /** 四个格子的快速输入框内容 */
-  @State inputQ1: string = '';
-  @State inputQ2: string = '';
-  @State inputQ3: string = '';
-  @State inputQ4: string = '';
-
 
   /** 华为账号与云备份 */
   @State hwNickName: string = '';
@@ -145,6 +143,10 @@ struct Index {
   @State systemFontScale: number = 1;
 
   private ctx: common.UIAbilityContext | undefined = undefined;
+
+  /** 全局唯一的「新建待办」弹窗控制器；沉浸光感档位变化时重建以应用新材质 */
+  private createDialog: CustomDialogController | undefined = undefined;
+  private createDialogLevel: number = -1;
 
   aboutToAppear(): void {
     this.boot();
@@ -489,29 +491,30 @@ struct Index {
     return result;
   }
 
-  private inputOf(quadrant: number): string {
-    if (quadrant === 1) {
-      return this.inputQ1;
-    }
-    if (quadrant === 2) {
-      return this.inputQ2;
-    }
-    if (quadrant === 3) {
-      return this.inputQ3;
-    }
-    return this.inputQ4;
+  /** 主界面氛围光晕色标：显式元组类型，满足 RadialGradientOptions.colors */
+  private glowStops(): [ResourceColor, number][] {
+    return [['#60A5FA', 0], ['#00000000', 1]];
   }
 
-  private setInput(quadrant: number, value: string): void {
-    if (quadrant === 1) {
-      this.inputQ1 = value;
-    } else if (quadrant === 2) {
-      this.inputQ2 = value;
-    } else if (quadrant === 3) {
-      this.inputQ3 = value;
-    } else {
-      this.inputQ4 = value;
+  private fabShadow(): ShadowOptions {
+    return { radius: 18, color: '#332563EB', offsetX: 0, offsetY: 6 };
+  }
+
+  /** 设置页展示设备算力等级与材质支持情况 */
+  private materialCapabilityText(): string {
+    const level: string = deviceLevelLabel();
+    const flag: string = immersiveSupported() ? '支持沉浸材质' : '不支持，已回退为纯色';
+    return `设备能力：${level} · ${flag}`;
+  }
+
+  /** 当前沉浸光感档位名称，用于设置页右侧状态 */
+  private materialLevelLabel(): string {
+    for (let i = 0; i < MATERIAL_OPTIONS.length; i++) {
+      if (MATERIAL_OPTIONS[i].key === this.settings.materialLevel) {
+        return MATERIAL_OPTIONS[i].label;
+      }
     }
+    return '标准';
   }
 
   private quadBg(quadrant: number): Resource {
@@ -639,6 +642,12 @@ struct Index {
     this.saveSettings(next, false);
   }
 
+  private changeMaterialLevel(key: number): void {
+    const next: AppSettings = this.settings.copy();
+    next.materialLevel = key;
+    this.saveSettings(next, false);
+  }
+
   private confirmClearAll(): void {
     this.getUIContext().showAlertDialog({
       title: '清空本账号',
@@ -672,17 +681,46 @@ struct Index {
 
   /* ==================== 操作 ==================== */
 
-  private async addTask(quadrant: number, raw: string): Promise<void> {
-    const title: string = raw.trim();
-    if (title.length === 0) {
-      return;
+  /** 统一新建入口：由 CreateTaskDialog 回调，写库后走既有的刷新链路 */
+  private createTask(title: string, quadrant: number, dueAt: number, important: boolean): void {
+    TaskRepository.getInstance().insert(title, quadrant, dueAt, important)
+      .then(() => {
+        this.afterChange();
+      })
+      .catch((err: Error) => {
+        this.toast('添加失败：' + err.message);
+      });
+  }
+
+  /**
+   * 打开全应用唯一的「新建待办」弹窗。
+   * 系统材质必须在 controller 构造时传入，因此档位变化后重建 controller。
+   */
+  private openCreateDialog(): void {
+    const level: number = this.settings.materialLevel;
+    if (this.createDialog === undefined || this.createDialogLevel !== level) {
+      this.createDialog = new CustomDialogController({
+        builder: CreateTaskDialog({
+          initialQuadrant: this.settings.defaultQuadrant,
+          materialLevel: level,
+          onSave: (title: string, quadrant: number, dueAt: number, important: boolean) => {
+            this.createTask(title, quadrant, dueAt, important);
+          }
+        }),
+        alignment: DialogAlignment.Bottom,
+        customStyle: true,
+        autoCancel: true,
+        offset: { dx: 0, dy: -12 },
+        cornerRadius: 28,
+        maskColor: $r('app.color.scrim'),
+        systemMaterial: dialogMaterialOf(level),
+        openAnimation: { duration: 320, curve: Curve.EaseOut },
+        closeAnimation: { duration: 220, curve: Curve.EaseIn }
+      });
+      this.createDialogLevel = level;
     }
-    try {
-      await TaskRepository.getInstance().insert(title, quadrant, 0, false);
-      this.setInput(quadrant, '');
-      await this.afterChange();
-    } catch (err) {
-      this.toast('添加失败：' + (err as Error).message);
+    if (this.createDialog !== undefined) {
+      this.createDialog.open();
     }
   }
 
@@ -1036,7 +1074,8 @@ struct Index {
     }
     .width('100%')
     .layoutWeight(1)
-    .padding({ left: 12, right: 12, bottom: 10 })
+    // 底部留出悬浮「新建待办」入口的空间，避免遮住第四象限的任务
+    .padding({ left: 12, right: 12, bottom: 68 })
   }
 
   @Builder
@@ -1080,65 +1119,6 @@ struct Index {
         .padding({ top: 6 })
       }
 
-      Row() {
-        Row() {
-          if (meta.key === 1) {
-            QuickInput({
-              text: $inputQ1,
-              placeholder: '添加任务…',
-              boxBg: $r('app.color.card'),
-              onCommit: () => {
-                this.addTask(1, this.inputQ1);
-              }
-            })
-          } else if (meta.key === 2) {
-            QuickInput({
-              text: $inputQ2,
-              placeholder: '添加任务…',
-              boxBg: $r('app.color.card'),
-              onCommit: () => {
-                this.addTask(2, this.inputQ2);
-              }
-            })
-          } else if (meta.key === 3) {
-            QuickInput({
-              text: $inputQ3,
-              placeholder: '添加任务…',
-              boxBg: $r('app.color.card'),
-              onCommit: () => {
-                this.addTask(3, this.inputQ3);
-              }
-            })
-          } else {
-            QuickInput({
-              text: $inputQ4,
-              placeholder: '添加任务…',
-              boxBg: $r('app.color.card'),
-              onCommit: () => {
-                this.addTask(4, this.inputQ4);
-              }
-            })
-          }
-        }
-        .layoutWeight(1)
-
-        Button() {
-          Text('＋')
-            .fontSize(17)
-            .fontColor($r('app.color.on_accent'))
-            .fontWeight(FontWeight.Medium)
-        }
-        .width(32)
-        .height(32)
-        .borderRadius(16)
-        .backgroundColor($r('app.color.accent'))
-        .margin({ left: 6 })
-        .onClick(() => {
-          this.addTask(meta.key, this.inputOf(meta.key));
-        })
-      }
-      .width('100%')
-      .margin({ top: 6 })
     }
     .layoutWeight(1)
     .height('100%')
@@ -1879,6 +1859,46 @@ struct Index {
 
               Column() {
                 Row() {
+                  Text('沉浸光感')
+                    .fontSize(14)
+                    .fontColor($r('app.color.fg'))
+                    .layoutWeight(1)
+                  Text(this.materialLevelLabel())
+                    .fontSize(12)
+                    .fontColor($r('app.color.muted'))
+                }
+                .width('100%')
+
+                Flex({ wrap: FlexWrap.Wrap }) {
+                  ForEach(MATERIAL_OPTIONS, (opt: SettingOption) => {
+                    Row() {
+                      this.OptChip(opt.label, this.settings.materialLevel === opt.key)
+                    }
+                    .onClick(() => {
+                      this.changeMaterialLevel(opt.key);
+                    })
+                    .margin({ right: 8, top: 8 })
+                  }, (opt: SettingOption) => `mat-${opt.key}-${this.settings.materialLevel === opt.key ? 1 : 0}`)
+                }
+                .width('100%')
+                .margin({ top: 10 })
+
+                Text('系统材质作用于「新建待办」弹窗与开关控件；档位越高，材质越厚、界面光晕越明显。关闭档位恢复纯色界面。')
+                  .fontSize(10)
+                  .fontColor($r('app.color.muted'))
+                  .margin({ top: 8 })
+                Text(this.materialCapabilityText())
+                  .fontSize(10)
+                  .fontColor($r('app.color.muted'))
+                  .margin({ top: 4 })
+              }
+              .width('100%')
+              .padding({ top: 13, bottom: 13 })
+              .alignItems(HorizontalAlign.Start)
+              this.RowDivider()
+
+              Column() {
+                Row() {
                   Text('字体大小')
                     .fontSize(14)
                     .fontColor($r('app.color.fg'))
@@ -2301,7 +2321,7 @@ struct Index {
                     .fontSize(14)
                     .fontColor($r('app.color.fg'))
                     .layoutWeight(1)
-                  Text('HarmonyOS 6.0（API 20）+')
+                  Text('HarmonyOS 7.0（API 26）+')
                     .fontSize(12)
                     .fontColor($r('app.color.muted'))
                 }
@@ -2373,7 +2393,27 @@ struct Index {
   }
 
   build() {
-    Stack() {
+    Stack({ alignContent: Alignment.BottomEnd }) {
+      // 底色单独一层，氛围光晕与内容分层叠加
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor($r('app.color.bg'))
+
+      // 沉浸光感：系统材质只作用于弹窗类组件，主界面用渐变光晕表达同一档位
+      if (this.settings.materialLevel > MAT_OFF) {
+        Column()
+          .width('100%')
+          .height('100%')
+          .radialGradient({
+            center: ['50%', '12%'],
+            radius: glowRadiusOf(this.settings.materialLevel),
+            colors: this.glowStops()
+          })
+          .opacity(glowOpacityOf(this.settings.materialLevel))
+          .hitTestBehavior(HitTestMode.None)
+      }
+
       Column() {
         this.Header()
 
@@ -2393,7 +2433,29 @@ struct Index {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor($r('app.color.bg'))
+
+      // 全应用唯一的「新建待办」入口
+      if (this.ready && this.agreed && !this.showEditor && !this.showRuler &&
+        !this.showDone && !this.showSettings) {
+        Row({ space: 6 }) {
+          Text('＋')
+            .fontSize(20)
+            .fontColor($r('app.color.on_accent'))
+          Text('新建待办')
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.on_accent'))
+        }
+        .height(48)
+        .padding({ left: 18, right: 20 })
+        .backgroundColor($r('app.color.accent'))
+        .borderRadius(24)
+        .shadow(this.fabShadow())
+        .margin({ right: 18, bottom: 20 })
+        .onClick(() => {
+          this.openCreateDialog();
+        })
+      }
 
       if (this.showEditor) {
         this.EditorPanel()

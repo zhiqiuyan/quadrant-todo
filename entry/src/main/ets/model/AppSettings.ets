@@ -20,6 +20,17 @@ export const FONT_NORMAL: number = 2;
 export const FONT_LARGE: number = 3;
 export const FONT_XLARGE: number = 4;
 
+/**
+ * 沉浸光感档位（HarmonyOS 7 / API 26）。
+ * 0 关闭，1-5 对应 uiMaterial 五档系统材质：极薄 / 薄 / 标准 / 厚 / 极厚。
+ */
+export const MAT_OFF: number = 0;
+export const MAT_ULTRA_THIN: number = 1;
+export const MAT_THIN: number = 2;
+export const MAT_REGULAR: number = 3;
+export const MAT_THICK: number = 4;
+export const MAT_ULTRA_THICK: number = 5;
+
 /** 档位 → 绝对缩放比；索引即档位值 */
 const FONT_RATIOS: number[] = [1, 0.9, 1, 1.15, 1.3];
 
@@ -44,6 +55,8 @@ export class AppSettings {
   widgetLines: number = 3;
   /** 字体档位：0 跟随系统 / 1 小 / 2 标准 / 3 大 / 4 特大 */
   fontMode: number = FONT_FOLLOW;
+  /** 沉浸光感档位：0 关闭 / 1 极薄 / 2 轻薄 / 3 标准 / 4 浓郁 / 5 极致 */
+  materialLevel: number = MAT_REGULAR;
 
   copy(): AppSettings {
     const next: AppSettings = new AppSettings();
@@ -53,6 +66,7 @@ export class AppSettings {
     next.showCompletedToday = this.showCompletedToday;
     next.widgetLines = this.widgetLines;
     next.fontMode = this.fontMode;
+    next.materialLevel = this.materialLevel;
     return next;
   }
 }
@@ -92,4 +106,13 @@ export const FONT_MODE_OPTIONS: SettingOption[] = [
   new SettingOption(FONT_NORMAL, '标准'),
   new SettingOption(FONT_LARGE, '大'),
   new SettingOption(FONT_XLARGE, '特大')
+];
+
+export const MATERIAL_OPTIONS: SettingOption[] = [
+  new SettingOption(MAT_OFF, '关闭'),
+  new SettingOption(MAT_ULTRA_THIN, '极薄'),
+  new SettingOption(MAT_THIN, '轻薄'),
+  new SettingOption(MAT_REGULAR, '标准'),
+  new SettingOption(MAT_THICK, '浓郁'),
+  new SettingOption(MAT_ULTRA_THICK, '极致')
 ];
