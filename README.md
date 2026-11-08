@@ -5,7 +5,7 @@
 灵感来自 [jailedxiu/quadrant-todo](https://github.com/jailedxiu/quadrant-todo)（网页版象限待办）。本仓库是原生鸿蒙实现：任务默认只存在本机数据库，不依赖任何账号体系；需要跨设备或与系统日历联动时，再按需开启对应能力。
 
 - 应用包名：`com.quadrant.todo`
-- 版本：**1.1.5**
+- 版本：**1.1.6**
 - 技术要求：HarmonyOS 6.0（API 20）及以上
 
 ## 功能一览
